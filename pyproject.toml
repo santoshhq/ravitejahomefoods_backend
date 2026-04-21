@@ -1,0 +1,17 @@
+[project]
+name = "ravitejafoods-backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "boto3>=1.42.90",
+    "certifi>=2026.2.25",
+    "dotenv>=0.9.9",
+    "fastapi>=0.136.0",
+    "motor>=3.7.1",
+    "pydantic[email]>=2.13.1",
+    "pymongo>=4.16.0",
+    "python-jose[cryptography]>=3.5.0",
+    "uvicorn>=0.44.0",
+]
