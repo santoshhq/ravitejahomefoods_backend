@@ -28,6 +28,7 @@ class Products(BaseModel):
     subcategory: Optional[str] = Field(default=None, description="Subcategory based on selected category")
     pricing: List[Pricing] = Field(..., description="List of pricing options")
     is_active: bool = Field(default=True)
+    admin_id: str = Field(..., description="Admin ID who created the product")
 
     def model_dump(self, **kwargs):
         data = super().model_dump(**kwargs)

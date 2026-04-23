@@ -6,6 +6,7 @@ from pymongo import ASCENDING
 from routers.categories_router import categories_router
 from routers.products_router import products_router
 from routers.uploads_router import upload_router
+from routers.coupons_routers import coupon_router
 
 app = FastAPI(title="RaviTeja Foods Backend")
 
@@ -37,3 +38,4 @@ app.include_router(admin_registration_router)
 app.include_router(categories_router)
 app.include_router(products_router)
 app.include_router(upload_router)
+app.include_router(coupon_router)

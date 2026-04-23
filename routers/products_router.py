@@ -26,7 +26,8 @@ async def create_product(
     subcategory: Optional[str] = Form(None),
     pricing: str = Form(...),  # Expect JSON string
     is_active: Optional[bool] = Form(True),
-    image_urls: Optional[str] = Form(None)  # JSON list of URLs
+    image_urls: Optional[str] = Form(None),  # JSON list of URLs
+    admin_id: str = Form(...)
 ):
     # Parse pricing JSON string
     try:
@@ -50,17 +51,31 @@ async def create_product(
         "category_id": category_id,
         "subcategory": subcategory,
         "pricing": pricing_list,
-        "is_active": is_active
+        "is_active": is_active,
+        "admin_id": admin_id
     }
 
     res = await products_collection.insert_one(product_dict)
     return {"message": "Successfully Inserted", "product_id": str(res.inserted_id), "images_url": urls}
 
 
-# Get all products
+
+# Get all products (optionally filter by admin_id)
 @products_router.get("/all")
-async def get_all_products():
-    products = await products_collection.find().to_list(1000)
+async def get_all_products(admin_id: Optional[str] = None):
+    """
+    Get all products. If admin_id is provided, only return products created by that admin.
+    """
+    query = {"admin_id": admin_id} if admin_id else {}
+    products = await products_collection.find(query).to_list(1000)
+    return all_products_data(products)
+# Get all products for a specific admin
+@products_router.get("/by-admin/{admin_id}")
+async def get_products_by_admin(admin_id: str):
+    """
+    Get all products created by a specific admin.
+    """
+    products = await products_collection.find({"admin_id": admin_id}).to_list(1000)
     return all_products_data(products)
 
 @products_router.get('/get_product/{product_id}')

@@ -11,6 +11,7 @@ def indiviual_data(category) -> dict:
 		"name": category.get("name"),
 		"business_type": category.get("business_type"),
 		"subcategory": [_subcategory_data(item) for item in subcategories],
+		"admin_id": category.get("admin_id"),
 	}
 
 

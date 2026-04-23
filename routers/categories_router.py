@@ -1,11 +1,10 @@
 from bson.errors import InvalidId
 from bson.objectid import ObjectId
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Query
 import re
 from pymongo import ReturnDocument
-from typing import Literal
-
-from config.collection import categories_collection
+from typing import Literal, Optional
+from config.collection import categories_collection, products_collection
 from models.categories_models import CreateCategory, UpdateCategory
 from schemas.categories_schema import all_data, indiviual_data
 
@@ -22,6 +21,9 @@ async def create_category(data: CreateCategory):
 			raise HTTPException(status_code=400, detail="Category with this name already exists")
 
 		payload = data.model_dump(mode="json")
+		# Ensure admin_id is present in payload (if not, raise error)
+		if not payload.get("admin_id"):
+			raise HTTPException(status_code=400, detail="admin_id is required for category creation")
 		response = await categories_collection.insert_one(payload)
 		created_category = await categories_collection.find_one({"_id": response.inserted_id})
 		if not created_category:
@@ -34,10 +36,28 @@ async def create_category(data: CreateCategory):
 		raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
-@categories_router.get("/")
-async def get_categories():
+@categories_router.get("/", status_code=status.HTTP_200_OK)
+async def get_categories(admin_id: Optional[str] = None):
+	"""
+	Get all categories. If admin_id is provided, only return categories created by that admin.
+	"""
 	try:
-		categories = await categories_collection.find().to_list(length=None)
+		query = {"admin_id": admin_id} if admin_id else {}
+		categories = await categories_collection.find(query).to_list(length=None)
+		return {
+			"count": len(categories),
+			"data": all_data(categories),
+		}
+	except Exception as e:
+		raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+# Get all categories for a specific admin
+@categories_router.get("/by-admin/{admin_id}", status_code=status.HTTP_200_OK)
+async def get_categories_by_admin(admin_id: str):
+	"""
+	Get all categories created by a specific admin.
+	"""
+	try:
+		categories = await categories_collection.find({"admin_id": admin_id}).to_list(length=None)
 		return {
 			"count": len(categories),
 			"data": all_data(categories),
@@ -75,9 +95,18 @@ async def get_subcategories_by_category_name(category_name: str):
 
 
 @categories_router.get("/by-business-type/{business_type}")
-async def get_categories_by_business_type(business_type: Literal["retail", "wholesale"]):
+async def get_categories_by_business_type(
+	business_type: Literal["retail", "wholesale"],
+	admin_id: str = Query(..., description="Admin ID (required)")
+):
+	"""
+	Get all categories for a business type and admin. admin_id is required.
+	"""
+	if not admin_id:
+		raise HTTPException(status_code=400, detail="admin_id is required")
 	try:
-		categories = await categories_collection.find({"business_type": business_type}).to_list(length=None)
+		query = {"business_type": business_type, "admin_id": admin_id}
+		categories = await categories_collection.find(query).to_list(length=None)
 		return {
 			"business_type": business_type,
 			"count": len(categories),
@@ -127,6 +156,10 @@ async def update_category(category_id: str, data: UpdateCategory):
 @categories_router.delete("/{category_id}", status_code=status.HTTP_200_OK)
 async def delete_category(category_id: str):
 	try:
+		# Check if any product is linked to this category
+		linked_product = await products_collection.find_one({"category_id": str(category_id)})
+		if linked_product:
+			raise HTTPException(status_code=400, detail="Cannot delete category: products are linked to this category.")
 		deleted_result = await categories_collection.delete_one({"_id": ObjectId(category_id)})
 		if deleted_result.deleted_count == 0:
 			raise HTTPException(status_code=404, detail="Category not found")

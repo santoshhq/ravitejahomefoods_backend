@@ -29,6 +29,7 @@ def product_data(product) -> dict:
         "subcategory": product.get("subcategory"),
         "pricing": pricing_data(product.get("pricing")),
         "is_active": product.get("is_active", True),
+        "admin_id": product.get("admin_id"),
     }
 
 def all_products_data(products) -> list:
