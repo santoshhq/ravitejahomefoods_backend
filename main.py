@@ -1,5 +1,5 @@
 from routers.admin_registration import admin_registration_router
-from config.collection import admin_registartion_collection
+from config.collection import admin_registartion_collection, carts_collection
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pymongo import ASCENDING
@@ -7,7 +7,9 @@ from routers.categories_router import categories_router
 from routers.products_router import products_router
 from routers.uploads_router import upload_router
 from routers.coupons_routers import coupon_router
-
+from routers.userslogin_routers import userlogin_router
+from routers.cart_router import cart_router
+from routers.orders_router import orders_router
 app = FastAPI(title="RaviTeja Foods Backend")
 
 # ── CORS ──────────────────────────────────────────────────────────
@@ -27,6 +29,15 @@ async def bootstrap_indexes():
         unique=True,
         name="uniq_admin_email",
     )
+    # Cart indexes
+    await carts_collection.create_index("user_email", sparse=True, name="idx_cart_user_email")
+    await carts_collection.create_index("guest_id", sparse=True, name="idx_cart_guest_id")
+    # TTL index: auto-delete abandoned guest carts after 7 days
+    await carts_collection.create_index(
+        "updated_at",
+        expireAfterSeconds=604800,
+        name="ttl_cart_updated_at",
+    )
 
 
 @app.get("/")
@@ -39,3 +50,6 @@ app.include_router(categories_router)
 app.include_router(products_router)
 app.include_router(upload_router)
 app.include_router(coupon_router)
+app.include_router(userlogin_router)
+app.include_router(cart_router)
+app.include_router(orders_router)
