@@ -28,6 +28,8 @@ def cart_data(cart: dict) -> dict:
         "coupon_code": cart.get("coupon_code"),
         "discount_amount": discount,
         "total_preview": round(subtotal - discount, 2),
+        "shipping_address": cart.get("shipping_address"),
+        "billing_address": cart.get("billing_address"),
         "updated_at": cart.get("updated_at"),
         "created_at": cart.get("created_at"),
     }
