@@ -70,6 +70,14 @@ async def get_all_products(admin_id: Optional[str] = None):
     products = await products_collection.find(query).to_list(1000)
     return all_products_data(products)
 # Get all products for a specific admin
+@products_router.get("/get_active_products")
+async def get_active_products():
+    """
+    Get all active products.
+    """
+    products = await products_collection.find({"is_active": True}).to_list(1000)
+    return all_products_data(products)
+
 @products_router.get("/by-admin/{admin_id}")
 async def get_products_by_admin(admin_id: str):
     """

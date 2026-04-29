@@ -9,6 +9,7 @@ class Address(BaseModel):
     mobile: str = Field(..., description="10-digit mobile number")
     address_line: str = Field(..., description="Full street address/house number")
     city: str
+    state: str = Field(..., description="State of residence")
     country: str = Field(default="India")
     pincode: str = Field(..., description="6-digit pincode")
 
@@ -25,6 +26,7 @@ class PaymentVerificationRequest(BaseModel):
     razorpay_order_id: str
     razorpay_payment_id: str
     razorpay_signature: str
+    guest_id: Optional[str] = None
 
 
 class OrderModel(BaseModel):
@@ -38,6 +40,7 @@ class OrderModel(BaseModel):
     gst_amount: float = 0.0
     delivery_charges: float = 0.0
     grand_total: float
+    coupon_code: Optional[str] = None
     
     razorpay_order_id: str
     razorpay_payment_id: Optional[str] = None

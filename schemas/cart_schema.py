@@ -1,7 +1,7 @@
 def cart_item_data(item: dict) -> dict:
     """Serialize a single cart item dict."""
     return {
-        "product_id": item.get("product_id"),
+        "product_id": str(item.get("product_id", "")),  # Convert ObjectId -> str
         "product_name": item.get("product_name"),
         "image_url": item.get("image_url"),
         "weight": item.get("weight"),

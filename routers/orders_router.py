@@ -1,4 +1,5 @@
 import os
+from bson import ObjectId
 import razorpay
 import httpx
 from fastapi import APIRouter, HTTPException, status, Depends
@@ -6,7 +7,7 @@ import random
 import string
 from datetime import datetime
 from typing import Optional
-from config.collection import orders_collection, carts_collection, users_collection
+from config.collection import orders_collection, carts_collection, users_collection, products_collection
 from models.order_model import PlaceOrderRequest, PaymentVerificationRequest, OrderModel
 from schemas.order_schema import order_data, all_orders_data
 from schemas.cart_schema import cart_data
@@ -67,7 +68,7 @@ async def send_order_confirmation_email(user_email: str, order: dict):
         
         <div style='text-align: right; margin-top: 15px;'>
             <p><strong>Subtotal:</strong> ₹{order['subtotal']}</p>
-            <p><strong>Discount:</strong> -₹{order['discount_amount']}</p>
+            <p><strong>Discount ({order.get('coupon_code') or 'None'}):</strong> -₹{order['discount_amount']}</p>
             <p><strong>GST (12%):</strong> ₹{order['gst_amount']}</p>
             <p><strong>Delivery:</strong> ₹{order['delivery_charges']}</p>
             <h3 style='color: #1D3557;'>Grand Total: ₹{order['grand_total']}</h3>
@@ -79,7 +80,7 @@ async def send_order_confirmation_email(user_email: str, order: dict):
             {order['shipping_address']['name']}<br/>
             {order['shipping_address']['mobile']}<br/>
             {order['shipping_address']['address_line']}, {order['shipping_address']['city']}<br/>
-            {order['shipping_address']['country']} - {order['shipping_address']['pincode']}
+            {order['shipping_address'].get('state', '')}, {order['shipping_address']['country']} - {order['shipping_address']['pincode']}
         </p>
         
         <p style='font-size: 12px; color: #777; text-align: center;'>
@@ -122,6 +123,21 @@ async def place_order(req: PlaceOrderRequest, current_user: str = Depends(get_op
     if not cart_doc or not cart_doc.get("items"):
         raise HTTPException(status_code=400, detail="Cart is empty")
     cart = cart_data(cart_doc)
+    
+    # Check pincode availability for retail products
+    has_retail = any(item.get("business_type") == "retail" for item in cart["items"])
+    if has_retail:
+        pincode = req.shipping_address.pincode
+        try:
+            pincode_int = int(pincode)
+            if not (500001 <= pincode_int <= 500115):
+                raise ValueError()
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Delivery for retail products is only available for pincodes between 500001 and 500115."
+            )
+            
     subtotal = cart["subtotal"]
     discount = cart["discount_amount"]
     gst_rate = 0.0
@@ -137,13 +153,27 @@ async def place_order(req: PlaceOrderRequest, current_user: str = Depends(get_op
         })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Razorpay Error: {str(e)}")
+        
+    # Save the address info to the cart so we have it for verify-payment
+    await carts_collection.update_one(
+        query,
+        {
+            "$set": {
+                "shipping_address": req.shipping_address.model_dump(),
+                "billing_address": req.billing_address.model_dump() if req.billing_address else req.shipping_address.model_dump(),
+                "order_contact_email": current_user if current_user else req.email
+            }
+        }
+    )
+    
     # Only return order details, do not insert into DB yet
+    # Use the serialized cart (from cart_data) to avoid ObjectId serialization issues
     return {
         "status": "success",
         "razorpay_order_id": razorpay_order["id"],
         "razorpay_key": os.getenv("RAZORPAY_KEY_ID"),
         "grand_total": grand_total,
-        "cart": cart_doc,
+        "cart": cart,
         "shipping_address": req.shipping_address.model_dump(),
         "billing_address": req.billing_address.model_dump() if req.billing_address else req.shipping_address.model_dump(),
         "email": current_user if current_user else req.email
@@ -161,32 +191,56 @@ async def verify_payment(req: PaymentVerificationRequest, current_user: str = De
             'razorpay_payment_id': req.razorpay_payment_id,
             'razorpay_signature': req.razorpay_signature
         })
-    except Exception:
+    except Exception as e:
+        print(f"Signature Verification Failed: {str(e)}")
         raise HTTPException(status_code=400, detail="Invalid payment signature")
 
     # 2. Fetch Cart and Details (simulate what was in /place)
     cart_query = resolve_order_query(current_user, req.guest_id if hasattr(req, 'guest_id') else None)
     cart_doc = await carts_collection.find_one(cart_query)
     if not cart_doc or not cart_doc.get("items"):
+        print(f"Cart empty or not found for query: {cart_query}")
         raise HTTPException(status_code=400, detail="Cart is empty or not found for payment verification")
-    # You may want to pass shipping/billing/email from frontend or store in a temp collection/session
-    # For now, fallback to cart_doc if possible
-    subtotal = cart_doc.get("subtotal", 0)
-    discount = cart_doc.get("discount_amount", 0)
+
+    # Check stock and status for each product before placing order
+    unavailable_products = []
+    for item in cart_doc["items"]:
+        try:
+            pid = ObjectId(item["product_id"]) if isinstance(item["product_id"], str) else item["product_id"]
+        except Exception:
+            pid = item["product_id"]
+            
+        product = await products_collection.find_one({
+            "_id": pid
+        })
+        if not product or product.get("is_active") is False:
+            unavailable_products.append({
+                "product_id": str(item["product_id"]),
+                "product_name": item.get("product_name"),
+                "reason": "Product is inactive or deleted"
+            })
+    if unavailable_products:
+        raise HTTPException(status_code=400, detail={"message": "Some products are unavailable", "products": unavailable_products})
+
+    # All products available, proceed
+    cart = cart_data(cart_doc)
+    subtotal = cart["subtotal"]
+    discount = cart["discount_amount"]
     gst_rate = 0.0
     taxable_amount = max(0, subtotal - discount)
     gst_amount = 0.0
     delivery_charges = 0.0
     grand_total = round(taxable_amount + gst_amount + delivery_charges, 2)
     custom_order_id = generate_custom_order_id()
-    order_contact_email = cart_doc.get("user_email")
+    order_contact_email = cart_doc.get("order_contact_email", cart_doc.get("user_email"))
     order_doc = {
         "user_email": order_contact_email,
         "guest_id": cart_doc.get("guest_id"),
-        "items": cart_doc["items"],
+        "items": cart["items"],
         "shipping_address": cart_doc.get("shipping_address"),
         "billing_address": cart_doc.get("billing_address", cart_doc.get("shipping_address")),
         "subtotal": subtotal,
+        "coupon_code": cart_doc.get("coupon_code"),
         "discount_amount": discount,
         "gst_amount": gst_amount,
         "delivery_charges": delivery_charges,
@@ -218,6 +272,11 @@ async def verify_payment(req: PaymentVerificationRequest, current_user: str = De
 @orders_router.get("/me")
 async def get_my_orders(current_user: str = Depends(get_current_user)):
     orders = await orders_collection.find({"user_email": current_user}).sort("created_at", -1).to_list(length=100)
+    return {"data": all_orders_data(orders)}
+
+@orders_router.get("/guest/{guest_id}")
+async def get_guest_orders(guest_id: str):
+    orders = await orders_collection.find({"guest_id": guest_id}).sort("created_at", -1).to_list(length=100)
     return {"data": all_orders_data(orders)}
 
 # ── Admin Endpoints ──────────────────────────────────────────────────────────

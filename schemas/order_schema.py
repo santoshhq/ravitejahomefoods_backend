@@ -27,6 +27,7 @@ def order_data(order: dict) -> dict:
         "shipping_address": address_data(order.get("shipping_address", {})),
         "billing_address": address_data(order.get("billing_address", {})),
         "subtotal": order.get("subtotal"),
+        "coupon_code": order.get("coupon_code"),
         "discount_amount": order.get("discount_amount"),
         "gst_amount": order.get("gst_amount"),
         "delivery_charges": order.get("delivery_charges"),
