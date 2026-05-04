@@ -1,11 +1,13 @@
-from fastapi import APIRouter,HTTPException,UploadFile,File
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 import uuid
 from typing import List,Annotated
 from config.aws_boto3 import s3, BUCKET_NAME
+from config.rate_limiter import limiter, RATE_LIMITS
 AWS_REGION = "us-east-1"
 upload_router=APIRouter(prefix="/imagesuploads",tags=["imageuploads"])
 @upload_router.post("/images")
-async def upload_images(files: List[UploadFile]= File(...)):
+@limiter.limit(RATE_LIMITS["upload_write"])
+async def upload_images(request: Request, files: List[UploadFile]= File(...)):
     try:
         image_urls = []
 
@@ -31,13 +33,15 @@ async def upload_images(files: List[UploadFile]= File(...)):
 
 # Get images by list of URLs (simply returns the URLs if they exist)
 @upload_router.post("/get_images")
-async def get_images(image_urls: List[str]):
+@limiter.limit(RATE_LIMITS["upload_read"])
+async def get_images(request: Request, image_urls: List[str]):
     # In a real scenario, you might check if these images exist in S3
     # Here, just return the URLs
     return {"image_urls": image_urls}
 
 @upload_router.get("/all_images")
-async def get_all_images():
+@limiter.limit(RATE_LIMITS["upload_list"])
+async def get_all_images(request: Request):
     try:
         image_urls = []
         # List all objects under the 'products/' prefix
@@ -52,7 +56,9 @@ async def get_all_images():
     
 # Update images: replace old images with new ones (delete old, upload new)
 @upload_router.put("/update_images")
+@limiter.limit(RATE_LIMITS["upload_write"])
 async def update_images(
+    request: Request,
     old_image_urls: List[str] = None,
     files: List[UploadFile] = File(None)
 ):
@@ -84,7 +90,8 @@ async def update_images(
 
 # Delete images (one or multiple)
 @upload_router.delete("/delete_images")
-async def delete_images(image_urls: List[str]):
+@limiter.limit(RATE_LIMITS["upload_write"])
+async def delete_images(request: Request, image_urls: List[str]):
     deleted = []
     errors = []
     for url in image_urls:

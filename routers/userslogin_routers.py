@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, Request, status, Depends
 from pydantic import EmailStr
 from datetime import datetime, timedelta
 import random
@@ -10,6 +10,7 @@ from models.userslogin_models import OTPModel,UserModel
 from config.jwt_auth.token_creation import create_access_token, decode_access_token
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
+from config.rate_limiter import limiter, RATE_LIMITS
 
 userlogin_router = APIRouter(prefix="/user-login", tags=["User Login"])
 
@@ -62,7 +63,8 @@ async def send_otp_email(email: str, otp: str):
 
 # Endpoint: Request OTP
 @userlogin_router.post("/request-otp")
-async def request_otp(email: EmailStr):
+@limiter.limit(RATE_LIMITS["user_request_otp"])
+async def request_otp(request: Request, email: EmailStr):
 	otp = generate_otp()
 	expires_at = datetime.utcnow() + timedelta(minutes=5)
 	await users_collection.update_one(
@@ -75,7 +77,8 @@ async def request_otp(email: EmailStr):
 
 # Endpoint: Verify OTP and login
 @userlogin_router.post("/verify-otp")
-async def verify_otp(email: EmailStr, otp: str):
+@limiter.limit(RATE_LIMITS["user_verify_otp"])
+async def verify_otp(request: Request, email: EmailStr, otp: str):
 	user = await users_collection.find_one({"email": email})
 	if not user or "otp" not in user:
 		raise HTTPException(status_code=400, detail="OTP not requested or user not found")
@@ -108,7 +111,8 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
 		raise HTTPException(status_code=401, detail="Invalid token")
 
 @userlogin_router.get("/me")
-async def get_me(email: str = Depends(get_current_user)):
+@limiter.limit(RATE_LIMITS["user_me"])
+async def get_me(request: Request, email: str = Depends(get_current_user)):
 	user = await users_collection.find_one({"email": email})
 	if not user:
 		raise HTTPException(status_code=404, detail="User not found")

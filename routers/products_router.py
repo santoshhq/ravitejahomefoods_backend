@@ -1,5 +1,5 @@
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 from typing import Annotated, Literal
 from schemas.products_schema import product_data, all_products_data
 from config.collection import products_collection, categories_collection
@@ -11,6 +11,7 @@ import re
 import json
 from bson import ObjectId
 from config.aws_boto3 import s3, BUCKET_NAME
+from config.rate_limiter import limiter, RATE_LIMITS
 products_router = APIRouter(prefix="/products", tags=["Products"])
 AWS_REGION = "us-east-1"
 # Create product with image upload
@@ -18,7 +19,9 @@ AWS_REGION = "us-east-1"
 
 # Create product (image upload handled by uploads_router, expects image_urls as input)
 @products_router.post("/create_product")
+@limiter.limit(RATE_LIMITS["product_write"])
 async def create_product(
+    request: Request,
     product_name: str = Form(...),
     description: str = Form(...),
     business_type: Literal["retail", "wholesale"] = Form(...),
@@ -62,7 +65,8 @@ async def create_product(
 
 # Get all products (optionally filter by admin_id)
 @products_router.get("/all")
-async def get_all_products(admin_id: Optional[str] = None):
+@limiter.limit(RATE_LIMITS["product_read"])
+async def get_all_products(request: Request, admin_id: Optional[str] = None):
     """
     Get all products. If admin_id is provided, only return products created by that admin.
     """
@@ -71,7 +75,8 @@ async def get_all_products(admin_id: Optional[str] = None):
     return all_products_data(products)
 # Get all products for a specific admin
 @products_router.get("/get_active_products")
-async def get_active_products():
+@limiter.limit(RATE_LIMITS["product_read"])
+async def get_active_products(request: Request):
     """
     Get all active products.
     """
@@ -79,7 +84,8 @@ async def get_active_products():
     return all_products_data(products)
 
 @products_router.get("/by-admin/{admin_id}")
-async def get_products_by_admin(admin_id: str):
+@limiter.limit(RATE_LIMITS["product_read"])
+async def get_products_by_admin(request: Request, admin_id: str):
     """
     Get all products created by a specific admin.
     """
@@ -87,7 +93,8 @@ async def get_products_by_admin(admin_id: str):
     return all_products_data(products)
 
 @products_router.get('/get_product/{product_id}')
-async def get_product_by_id(product_id: str):
+@limiter.limit(RATE_LIMITS["product_read"])
+async def get_product_by_id(request: Request, product_id: str):
     try:
         res = await products_collection.find_one({"_id": ObjectId(product_id)})
         if not res:
@@ -101,7 +108,9 @@ async def get_product_by_id(product_id: str):
 
 # Update product (image upload/update handled by uploads_router, expects image_urls as input)
 @products_router.put("/update_product/{product_id}")
+@limiter.limit(RATE_LIMITS["product_write"])
 async def update_product(
+    request: Request,
     product_id: str,
     product_name: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
@@ -165,7 +174,8 @@ async def update_product(
 
 # Delete product by id and its images from S3
 @products_router.delete("/delete_product/{product_id}")
-async def delete_product(product_id: str):
+@limiter.limit(RATE_LIMITS["product_write"])
+async def delete_product(request: Request, product_id: str):
     product = await products_collection.find_one({"_id": ObjectId(product_id)})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found.")

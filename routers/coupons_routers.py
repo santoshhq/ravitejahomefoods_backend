@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException, status, Form, Query
+from fastapi import APIRouter, HTTPException, Request, status, Form, Query
 from config.collection import coupons_collection
 from models.coupons_models import CreateCoupon, UpdateCoupon
 from schemas.coupons_schema import coupon_data, all_coupons_data
 from typing import Optional, Literal
 from bson import ObjectId
+from config.rate_limiter import limiter, RATE_LIMITS
 
 coupon_router = APIRouter(prefix="/coupons", tags=["Coupons"])
 
@@ -24,7 +25,9 @@ def get_object_id(id: str) -> ObjectId:
     name="coupons:create-coupon",
     summary="Create a new coupon",
 )
+@limiter.limit(RATE_LIMITS["coupon_write"])
 async def create_coupon(
+    request: Request,
     couponcode: str = Form(...),
     coupon_type: Literal["percentage", "fixed"] = Form(...),
     value: float = Form(...),
@@ -66,7 +69,8 @@ async def create_coupon(
     name="coupons:get-coupons-by-admin",
     summary="Get all coupons by admin ID",
 )
-async def get_coupons_by_admin(admin_id: str = Query(...)):
+@limiter.limit(RATE_LIMITS["coupon_read"])
+async def get_coupons_by_admin(request: Request, admin_id: str = Query(...)):
     coupons = await coupons_collection.find({"admin_id": admin_id}).to_list(length=None)
     return {"data": all_coupons_data(coupons)}
 
@@ -78,7 +82,8 @@ async def get_coupons_by_admin(admin_id: str = Query(...)):
     name="coupons:get-coupon",
     summary="Get a single coupon by ID",
 )
-async def get_coupon(coupon_id: str):
+@limiter.limit(RATE_LIMITS["coupon_read"])
+async def get_coupon(request: Request, coupon_id: str):
     coupon = await coupons_collection.find_one({"_id": get_object_id(coupon_id)})
     if not coupon:
         raise HTTPException(status_code=404, detail="Coupon not found")
@@ -92,7 +97,9 @@ async def get_coupon(coupon_id: str):
     name="coupons:update-coupon",
     summary="Update a coupon by ID",
 )
+@limiter.limit(RATE_LIMITS["coupon_write"])
 async def update_coupon(
+    request: Request,
     coupon_id: str,
     couponcode: Optional[str] = Form(None),
     coupon_type: Optional[Literal["percentage", "fixed"]] = Form(None),
@@ -143,7 +150,9 @@ async def update_coupon(
     name="coupons:delete-coupon",
     summary="Delete a coupon by ID",
 )
+@limiter.limit(RATE_LIMITS["coupon_write"])
 async def delete_coupon(
+    request: Request,
     coupon_id: str,
     admin_id: str = Query(..., description="Admin ID for authorization"),
 ):

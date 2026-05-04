@@ -1,6 +1,7 @@
 from fastapi import (
  APIRouter,
- HTTPException
+ HTTPException,
+ Request
 )
 
 from math import ceil
@@ -15,6 +16,7 @@ from models.shippingcharges_model import (
  ShippingEstimateRequest
 )
 from schemas.shippingcharges_schema import individual_shipping_config,serialized_shipping_configs
+from config.rate_limiter import limiter, RATE_LIMITS
 
 
 shipping_router=APIRouter(
@@ -31,7 +33,9 @@ shipping_router=APIRouter(
 @shipping_router.post(
 "/admin/{admin_id}/rules"
 )
+@limiter.limit(RATE_LIMITS["shipping_write"])
 async def create_shipping_rules(
+ request: Request,
  admin_id:str,
  payload:
  CountryShippingCreate
@@ -104,7 +108,9 @@ async def create_shipping_rules(
 @shipping_router.get(
 "/admin/{admin_id}/rules"
 )
+@limiter.limit(RATE_LIMITS["shipping_read"])
 async def get_shipping_rules(
+ request: Request,
  admin_id:str
 ):
 
@@ -132,7 +138,8 @@ async def get_shipping_rules(
 @shipping_router.get(
 "/countries"
 )
-async def get_available_countries():
+@limiter.limit(RATE_LIMITS["shipping_public"])
+async def get_available_countries(request: Request):
    countries = await shipping_charges.distinct("country")
    return {
       "countries": sorted(countries)
@@ -147,7 +154,8 @@ async def get_available_countries():
 @shipping_router.get(
 "/countries/{country}/states"
 )
-async def get_available_states(country: str):
+@limiter.limit(RATE_LIMITS["shipping_public"])
+async def get_available_states(request: Request, country: str):
    doc = await shipping_charges.find_one({
       "country": country
    })
@@ -177,7 +185,9 @@ async def get_available_states(country: str):
 @shipping_router.post(
 "/admin/{admin_id}/add-state"
 )
+@limiter.limit(RATE_LIMITS["shipping_write"])
 async def add_state(
+ request: Request,
  admin_id:str,
  payload:AddStateRequest
 ):
@@ -253,7 +263,9 @@ async def add_state(
 @shipping_router.post(
 "/admin/{admin_id}/add-zone"
 )
+@limiter.limit(RATE_LIMITS["shipping_write"])
 async def add_zone(
+ request: Request,
  admin_id:str,
  payload:AddZoneRequest
 ):
@@ -359,7 +371,9 @@ async def add_zone(
 @shipping_router.post(
 "/estimate"
 )
+@limiter.limit(RATE_LIMITS["shipping_read"])
 async def estimate_shipping(
+ request: Request,
  payload:
  ShippingEstimateRequest
 ):

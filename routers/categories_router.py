@@ -1,19 +1,21 @@
 from bson.errors import InvalidId
 from bson.objectid import ObjectId
-from fastapi import APIRouter, HTTPException, status, Query
+from fastapi import APIRouter, HTTPException, Request, status, Query
 import re
 from pymongo import ReturnDocument
 from typing import Literal, Optional
 from config.collection import categories_collection, products_collection
 from models.categories_models import CreateCategory, UpdateCategory
 from schemas.categories_schema import all_data, indiviual_data
+from config.rate_limiter import limiter, RATE_LIMITS
 
 
 categories_router = APIRouter(prefix="/categories", tags=["Categories"])
 
 
 @categories_router.post("/create")
-async def create_category(data: CreateCategory):
+@limiter.limit(RATE_LIMITS["category_write"])
+async def create_category(request: Request, data: CreateCategory):
 	try:
 		# Check for duplicate category name (case-insensitive)
 		existing = await categories_collection.find_one({"name": {"$regex": f"^{re.escape(data.name)}$", "$options": "i"}})
@@ -37,7 +39,8 @@ async def create_category(data: CreateCategory):
 
 
 @categories_router.get("/", status_code=status.HTTP_200_OK)
-async def get_categories(admin_id: Optional[str] = None):
+@limiter.limit(RATE_LIMITS["category_read"])
+async def get_categories(request: Request, admin_id: Optional[str] = None):
 	"""
 	Get all categories. If admin_id is provided, only return categories created by that admin.
 	"""
@@ -52,7 +55,8 @@ async def get_categories(admin_id: Optional[str] = None):
 		raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 # Get all categories for a specific admin
 @categories_router.get("/by-admin/{admin_id}", status_code=status.HTTP_200_OK)
-async def get_categories_by_admin(admin_id: str):
+@limiter.limit(RATE_LIMITS["category_read"])
+async def get_categories_by_admin(request: Request, admin_id: str):
 	"""
 	Get all categories created by a specific admin.
 	"""
@@ -67,7 +71,8 @@ async def get_categories_by_admin(admin_id: str):
 
 
 @categories_router.get("/by-name/{category_name}/subcategories")
-async def get_subcategories_by_category_name(category_name: str):
+@limiter.limit(RATE_LIMITS["category_read"])
+async def get_subcategories_by_category_name(request: Request, category_name: str):
 	try:
 		category = await categories_collection.find_one(
 			{"name": {"$regex": f"^{re.escape(category_name)}$", "$options": "i"}}
@@ -95,7 +100,9 @@ async def get_subcategories_by_category_name(category_name: str):
 
 
 @categories_router.get("/by-business-type/{business_type}")
+@limiter.limit(RATE_LIMITS["category_read"])
 async def get_categories_by_business_type(
+    request: Request,
 	business_type: Literal["retail", "wholesale"],
 	admin_id: str = Query(..., description="Admin ID (required)")
 ):
@@ -117,7 +124,8 @@ async def get_categories_by_business_type(
 
 
 @categories_router.get("/{category_id}")
-async def get_category(category_id: str):
+@limiter.limit(RATE_LIMITS["category_read"])
+async def get_category(request: Request, category_id: str):
 	try:
 		category = await categories_collection.find_one({"_id": ObjectId(category_id)})
 		if not category:
@@ -130,7 +138,8 @@ async def get_category(category_id: str):
 
 
 @categories_router.put("/{category_id}")
-async def update_category(category_id: str, data: UpdateCategory):
+@limiter.limit(RATE_LIMITS["category_write"])
+async def update_category(request: Request, category_id: str, data: UpdateCategory):
 	try:
 		updated_data = data.model_dump(mode="json", exclude_unset=True, exclude_none=True)
 		if not updated_data:
@@ -154,7 +163,8 @@ async def update_category(category_id: str, data: UpdateCategory):
 
 
 @categories_router.delete("/{category_id}", status_code=status.HTTP_200_OK)
-async def delete_category(category_id: str):
+@limiter.limit(RATE_LIMITS["category_write"])
+async def delete_category(request: Request, category_id: str):
 	try:
 		# Check if any product is linked to this category
 		linked_product = await products_collection.find_one({"category_id": str(category_id)})

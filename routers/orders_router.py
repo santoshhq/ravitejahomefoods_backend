@@ -2,7 +2,7 @@ import os
 from bson import ObjectId
 import razorpay
 import httpx
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, Request, status, Depends
 import random
 import string
 from datetime import datetime
@@ -26,6 +26,7 @@ from schemas.order_schema import order_data, all_orders_data
 from schemas.cart_schema import cart_data
 from routers.cart_router import get_current_user, get_optional_user
 from config.jwt_auth.token_creation import get_current_admin
+from config.rate_limiter import limiter, RATE_LIMITS
 
 orders_router = APIRouter(prefix="/orders", tags=["Orders"])
 
@@ -203,7 +204,9 @@ async def estimate_delivery_cost(country: str, state: str, pincode: str, order_t
 
 
 @orders_router.post("/delivery-estimate")
+@limiter.limit(RATE_LIMITS["order_estimate"])
 async def delivery_estimate(
+    request: Request,
     req: DeliveryEstimateRequest,
     current_user: str = Depends(get_optional_user),
 ):
@@ -225,7 +228,8 @@ async def delivery_estimate(
 
 # Step 1: Place order now only creates Razorpay order and returns details, does NOT insert order into DB
 @orders_router.post("/place", status_code=status.HTTP_201_CREATED)
-async def place_order(req: PlaceOrderRequest, current_user: str = Depends(get_optional_user)):
+@limiter.limit(RATE_LIMITS["order_place"])
+async def place_order(request: Request, req: PlaceOrderRequest, current_user: str = Depends(get_optional_user)):
     query = resolve_order_query(current_user, req.guest_id)
     cart_doc = await carts_collection.find_one(query)
     if not cart_doc or not cart_doc.get("items"):
@@ -299,7 +303,8 @@ async def place_order(req: PlaceOrderRequest, current_user: str = Depends(get_op
 
 # Step 2: Insert order into DB only after payment is verified
 @orders_router.post("/verify-payment")
-async def verify_payment(req: PaymentVerificationRequest, current_user: str = Depends(get_optional_user)):
+@limiter.limit(RATE_LIMITS["order_verify"])
+async def verify_payment(request: Request, req: PaymentVerificationRequest, current_user: str = Depends(get_optional_user)):
     # 1. Verify Signature
     try:
         razorpay_client.utility.verify_payment_signature({
@@ -394,7 +399,8 @@ async def verify_payment(req: PaymentVerificationRequest, current_user: str = De
 
 
 @orders_router.get("/guest/{guest_id}")
-async def get_guest_orders(guest_id: str):
+@limiter.limit(RATE_LIMITS["order_read"])
+async def get_guest_orders(request: Request, guest_id: str):
     orders = await orders_collection.find({"guest_id": guest_id}).sort("created_at", -1).to_list(length=100)
     return {"data": all_orders_data(orders)}
 

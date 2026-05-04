@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status, Query, Depends
+from fastapi import APIRouter, HTTPException, Request, status, Query, Depends
 from fastapi.security import OAuth2PasswordBearer
 from typing import Optional
 from datetime import datetime
@@ -14,6 +14,7 @@ from models.cart_model import (
 )
 from schemas.cart_schema import cart_data
 from config.jwt_auth.token_creation import decode_access_token
+from config.rate_limiter import limiter, RATE_LIMITS
 
 cart_router = APIRouter(prefix="/cart", tags=["Cart"])
 
@@ -71,7 +72,9 @@ def resolve_query(user_email: Optional[str], guest_id: Optional[str]) -> dict:
     name="cart:get-cart",
     summary="Get the current cart (guest or logged-in user)",
 )
+@limiter.limit(RATE_LIMITS["cart_read"])
 async def get_cart(
+    request: Request,
     guest_id: Optional[str] = Query(default=None),
     current_user: Optional[str] = Depends(get_optional_user),
 ):
@@ -91,7 +94,9 @@ async def get_cart(
     name="cart:add-bulk",
     summary="Add multiple items to cart in one request",
 )
+@limiter.limit(RATE_LIMITS["cart_write"])
 async def add_bulk_to_cart(
+    request: Request,
     req: BulkAddToCartRequest,
     current_user: Optional[str] = Depends(get_optional_user),
 ):
@@ -161,7 +166,9 @@ async def add_bulk_to_cart(
     name="cart:update-item",
     summary="Update quantity of a cart item (quantity=0 removes the item)",
 )
+@limiter.limit(RATE_LIMITS["cart_write"])
 async def update_cart_item(
+    request: Request,
     req: UpdateCartItemRequest,
     current_user: Optional[str] = Depends(get_optional_user),
 ):
@@ -216,7 +223,9 @@ async def update_cart_item(
     name="cart:clear",
     summary="Empty the entire cart",
 )
+@limiter.limit(RATE_LIMITS["cart_sensitive"])
 async def clear_cart(
+    request: Request,
     guest_id: Optional[str] = Query(default=None),
     current_user: Optional[str] = Depends(get_optional_user),
 ):
@@ -233,7 +242,9 @@ async def clear_cart(
     name="cart:apply-coupon",
     summary="Apply a coupon code and preview the discount",
 )
+@limiter.limit(RATE_LIMITS["cart_sensitive"])
 async def apply_coupon(
+    request: Request,
     req: ApplyCouponRequest,
     current_user: Optional[str] = Depends(get_optional_user),
 ):
@@ -312,7 +323,9 @@ async def apply_coupon(
     name="cart:remove-coupon",
     summary="Remove applied coupon from cart",
 )
+@limiter.limit(RATE_LIMITS["cart_sensitive"])
 async def remove_coupon(
+    request: Request,
     guest_id: Optional[str] = Query(default=None),
     current_user: Optional[str] = Depends(get_optional_user),
 ):
@@ -341,7 +354,9 @@ async def remove_coupon(
     name="cart:merge",
     summary="Merge guest cart into logged-in user cart (call right after login)",
 )
+@limiter.limit(RATE_LIMITS["cart_merge"])
 async def merge_cart(
+    request: Request,
     req: MergeCartRequest,
     current_user: str = Depends(get_current_user),
 ):

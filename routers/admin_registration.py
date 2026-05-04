@@ -7,7 +7,8 @@ from models.admin_registration import (
     updateRegistration,
 )
 from schemas.admin_registration import all_data , indiviual_data
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from config.rate_limiter import limiter, RATE_LIMITS
 from fastapi.security import OAuth2PasswordRequestForm
 from bson.objectid import ObjectId
 from bson.errors import InvalidId
@@ -17,7 +18,8 @@ from pymongo import ReturnDocument
 admin_registration_router=APIRouter(prefix="/admin-registration",tags=["Admin-Authentication"])
 
 @admin_registration_router.post("/create", response_model=RegistrationResponse, status_code=status.HTTP_201_CREATED)
-async def creater_registration(register:Registration):
+@limiter.limit(RATE_LIMITS["admin_create"])
+async def creater_registration(request: Request, register: Registration):
     try:
         payload = register.model_dump(mode="json")
         response = await admin_registartion_collection.insert_one(payload)
@@ -35,7 +37,8 @@ async def creater_registration(register:Registration):
 
 
 @admin_registration_router.post("/login", response_model=LoginResponse)
-async def admin_login(form_data: OAuth2PasswordRequestForm = Depends()):
+@limiter.limit(RATE_LIMITS["admin_login"])
+async def admin_login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
     try:
         admin = await admin_registartion_collection.find_one({"email": form_data.username})
         if not admin:
@@ -70,7 +73,8 @@ async def admin_login(form_data: OAuth2PasswordRequestForm = Depends()):
         raise HTTPException(status_code=500, detail=str(e))
 
 @admin_registration_router.post("/refresh")
-async def refresh_token(_current_admin: dict = Depends(get_current_admin)):
+@limiter.limit(RATE_LIMITS["admin_refresh"])
+async def refresh_token(request: Request, _current_admin: dict = Depends(get_current_admin)):
     try:
         token_payload = {
             "sub": str(_current_admin.get("id")),
@@ -95,7 +99,9 @@ async def refresh_token(_current_admin: dict = Depends(get_current_admin)):
     
 @admin_registration_router.put("/update-registration/{user_id}", response_model=RegistrationResponse)
 @admin_registration_router.put("/update-regratration/{user_id}", include_in_schema=False, response_model=RegistrationResponse)
+@limiter.limit(RATE_LIMITS["admin_update"])
 async def update_user(
+    request: Request,
     user_id: str,
     register: updateRegistration,
     _current_admin: dict = Depends(get_current_admin),
