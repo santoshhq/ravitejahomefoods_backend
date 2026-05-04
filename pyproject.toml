@@ -15,5 +15,6 @@ dependencies = [
     "pymongo>=4.16.0",
     "python-jose[cryptography]>=3.5.0",
     "razorpay>=2.0.1",
+    "slowapi>=0.1.9",
     "uvicorn>=0.44.0",
 ]

@@ -9,14 +9,15 @@ def order_item_data(item: dict) -> dict:
         "business_type": item.get("business_type"),
     }
 
-def address_data(address: dict) -> dict:
+def address_data(address: dict | None) -> dict:
+    safe_address = address or {}
     return {
-        "name": address.get("name"),
-        "mobile": address.get("mobile"),
-        "address_line": address.get("address_line"),
-        "city": address.get("city"),
-        "country": address.get("country"),
-        "pincode": address.get("pincode"),
+        "name": safe_address.get("name"),
+        "mobile": safe_address.get("mobile"),
+        "address_line": safe_address.get("address_line"),
+        "city": safe_address.get("city"),
+        "country": safe_address.get("country"),
+        "pincode": safe_address.get("pincode"),
     }
 
 def order_data(order: dict) -> dict:

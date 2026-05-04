@@ -7,8 +7,21 @@ import random
 import string
 from datetime import datetime
 from typing import Optional
-from config.collection import orders_collection, carts_collection, users_collection, products_collection
-from models.order_model import PlaceOrderRequest, PaymentVerificationRequest, OrderModel
+from math import ceil
+import re
+from config.collection import (
+    orders_collection,
+    carts_collection,
+    users_collection,
+    products_collection,
+    shipping_charges,
+)
+from models.order_model import (
+    PlaceOrderRequest,
+    PaymentVerificationRequest,
+    DeliveryEstimateRequest,
+    OrderModel,
+)
 from schemas.order_schema import order_data, all_orders_data
 from schemas.cart_schema import cart_data
 from routers.cart_router import get_current_user, get_optional_user
@@ -115,6 +128,101 @@ def resolve_order_query(user_email: Optional[str], guest_id: Optional[str]) -> d
     raise HTTPException(status_code=400, detail="User identification missing (email or guest_id)")
 
 
+def parse_weight_grams(weight_value: Optional[str]) -> float:
+    if not weight_value:
+        return 0.0
+    normalized = weight_value.strip().lower().replace(" ", "")
+    match = re.match(r"([0-9]*\.?[0-9]+)(kg|g)$", normalized)
+    if not match:
+        return 0.0
+    amount = float(match.group(1))
+    unit = match.group(2)
+    return amount * 1000 if unit == "kg" else amount
+
+
+def calculate_cart_weight_grams(items: list[dict]) -> float:
+    total = 0.0
+    for item in items:
+        grams = parse_weight_grams(item.get("weight"))
+        qty = item.get("quantity", 0)
+        total += grams * qty
+    return total
+
+
+async def estimate_delivery_cost(country: str, state: str, pincode: str, order_total: float, items: list[dict]) -> dict:
+    try:
+        zipcode = int(pincode)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid pincode")
+
+    doc = await shipping_charges.find_one({"country": country})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Shipping config not found")
+
+    matched_zone = None
+    for state_entry in doc.get("states", []):
+        if state_entry.get("state_name", "").lower() == state.lower():
+            for zone in state_entry.get("zones", []):
+                if zone.get("start_zipcode") <= zipcode <= zone.get("end_zipcode"):
+                    matched_zone = zone
+                    break
+        if matched_zone:
+            break
+
+    if not matched_zone:
+        raise HTTPException(status_code=404, detail="No delivery available")
+
+    free_min = matched_zone.get("free_delivery_min_order_value", 0)
+    if order_total >= free_min:
+        return {
+            "country": country,
+            "state": state,
+            "pincode": pincode,
+            "order_total": order_total,
+            "shipping_charge": 0.0,
+            "free_delivery": True,
+            "message": "Free delivery applied",
+        }
+
+    weight_grams = calculate_cart_weight_grams(items)
+    weight_kg = weight_grams / 1000 if weight_grams else 0.0
+    billable_weight = ceil(weight_kg)
+    shipping_charge = round(billable_weight * matched_zone.get("charge_per_kg", 0), 2)
+
+    return {
+        "country": country,
+        "state": state,
+        "pincode": pincode,
+        "order_total": order_total,
+        "actual_weight_kg": weight_kg,
+        "billable_weight_kg": billable_weight,
+        "charge_per_kg": matched_zone.get("charge_per_kg"),
+        "shipping_charge": shipping_charge,
+        "free_delivery": False,
+    }
+
+
+@orders_router.post("/delivery-estimate")
+async def delivery_estimate(
+    req: DeliveryEstimateRequest,
+    current_user: str = Depends(get_optional_user),
+):
+    query = resolve_order_query(current_user, req.guest_id)
+    cart_doc = await carts_collection.find_one(query)
+    if not cart_doc or not cart_doc.get("items"):
+        raise HTTPException(status_code=400, detail="Cart is empty")
+
+    cart = cart_data(cart_doc)
+    order_total = max(0.0, cart.get("total_preview", 0.0))
+    return await estimate_delivery_cost(
+        req.country,
+        req.state,
+        req.pincode,
+        order_total,
+        cart_doc.get("items", []),
+    )
+
+
 # Step 1: Place order now only creates Razorpay order and returns details, does NOT insert order into DB
 @orders_router.post("/place", status_code=status.HTTP_201_CREATED)
 async def place_order(req: PlaceOrderRequest, current_user: str = Depends(get_optional_user)):
@@ -143,7 +251,14 @@ async def place_order(req: PlaceOrderRequest, current_user: str = Depends(get_op
     gst_rate = 0.0
     taxable_amount = max(0, subtotal - discount)
     gst_amount = 0.0
-    delivery_charges = 0.0
+    delivery_preview = await estimate_delivery_cost(
+        req.shipping_address.country,
+        req.shipping_address.state,
+        req.shipping_address.pincode,
+        taxable_amount,
+        cart_doc.get("items", []),
+    )
+    delivery_charges = delivery_preview.get("shipping_charge", 0.0)
     grand_total = round(taxable_amount + gst_amount + delivery_charges, 2)
     try:
         razorpay_order = razorpay_client.order.create({
@@ -173,6 +288,7 @@ async def place_order(req: PlaceOrderRequest, current_user: str = Depends(get_op
         "razorpay_order_id": razorpay_order["id"],
         "razorpay_key": os.getenv("RAZORPAY_KEY_ID"),
         "grand_total": grand_total,
+        "delivery_charges": delivery_charges,
         "cart": cart,
         "shipping_address": req.shipping_address.model_dump(),
         "billing_address": req.billing_address.model_dump() if req.billing_address else req.shipping_address.model_dump(),
@@ -229,7 +345,15 @@ async def verify_payment(req: PaymentVerificationRequest, current_user: str = De
     gst_rate = 0.0
     taxable_amount = max(0, subtotal - discount)
     gst_amount = 0.0
-    delivery_charges = 0.0
+    shipping_address = cart_doc.get("shipping_address") or {}
+    delivery_preview = await estimate_delivery_cost(
+        shipping_address.get("country", ""),
+        shipping_address.get("state", ""),
+        shipping_address.get("pincode", ""),
+        taxable_amount,
+        cart_doc.get("items", []),
+    )
+    delivery_charges = delivery_preview.get("shipping_charge", 0.0)
     grand_total = round(taxable_amount + gst_amount + delivery_charges, 2)
     custom_order_id = generate_custom_order_id()
     order_contact_email = cart_doc.get("order_contact_email", cart_doc.get("user_email"))
@@ -268,11 +392,6 @@ async def verify_payment(req: PaymentVerificationRequest, current_user: str = De
 
     return {"status": "success", "message": "Order confirmed and cart cleared", "order_id": str(result.inserted_id), "custom_order_id": custom_order_id}
 
-
-@orders_router.get("/me")
-async def get_my_orders(current_user: str = Depends(get_current_user)):
-    orders = await orders_collection.find({"user_email": current_user}).sort("created_at", -1).to_list(length=100)
-    return {"data": all_orders_data(orders)}
 
 @orders_router.get("/guest/{guest_id}")
 async def get_guest_orders(guest_id: str):

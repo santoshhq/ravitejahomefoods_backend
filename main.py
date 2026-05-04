@@ -10,15 +10,24 @@ from routers.coupons_routers import coupon_router
 from routers.userslogin_routers import userlogin_router
 from routers.cart_router import cart_router
 from routers.orders_router import orders_router
-app = FastAPI(title="RaviTeja Foods Backend")
+from routers.shippingcharges_router import shipping_router
+from config.rate_limiter import limiter
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
+app = FastAPI(title="RaviTeja Foods Backend")
+# ── RATE_LIMITER ──────────────────────────────────────────────────────────
+app.state.limiter=limiter
+app.add_exception_handler(RateLimitExceeded,_rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 # ── CORS ──────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],          # tighten to your domain in production
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*"], 
 )
 
 
@@ -53,3 +62,4 @@ app.include_router(coupon_router)
 app.include_router(userlogin_router)
 app.include_router(cart_router)
 app.include_router(orders_router)
+app.include_router(shipping_router)

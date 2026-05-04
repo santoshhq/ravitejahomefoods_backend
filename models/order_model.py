@@ -29,6 +29,13 @@ class PaymentVerificationRequest(BaseModel):
     guest_id: Optional[str] = None
 
 
+class DeliveryEstimateRequest(BaseModel):
+    country: str
+    state: str
+    pincode: str
+    guest_id: Optional[str] = None
+
+
 class OrderModel(BaseModel):
     user_email: Optional[EmailStr] = None
     guest_id: Optional[str] = None
