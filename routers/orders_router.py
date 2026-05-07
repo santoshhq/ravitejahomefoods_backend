@@ -3,12 +3,14 @@ from bson import ObjectId
 import razorpay
 import httpx
 from fastapi import APIRouter, HTTPException, Request, status, Depends
+from fastapi.encoders import jsonable_encoder
 import random
 import string
 from datetime import datetime
 from typing import Optional
 from math import ceil
 import re
+import json
 from config.collection import (
     orders_collection,
     carts_collection,
@@ -27,7 +29,7 @@ from schemas.cart_schema import cart_data
 from routers.cart_router import get_current_user, get_optional_user
 from config.jwt_auth.token_creation import get_current_admin
 from config.rate_limiter import limiter, RATE_LIMITS
-
+from config.redis_caching import redis_client,clear_orders_routers_cache
 orders_router = APIRouter(prefix="/orders", tags=["Orders"])
 
 # Initialize Razorpay Client
@@ -394,7 +396,7 @@ async def verify_payment(request: Request, req: PaymentVerificationRequest, curr
     email_dest = order_contact_email
     if email_dest:
         await send_order_confirmation_email(email_dest, order_doc)
-
+    await clear_orders_routers_cache()
     return {"status": "success", "message": "Order confirmed and cart cleared", "order_id": str(result.inserted_id), "custom_order_id": custom_order_id}
 
 
@@ -407,12 +409,55 @@ async def get_guest_orders(request: Request, guest_id: str):
 # ── Admin Endpoints ──────────────────────────────────────────────────────────
 
 @orders_router.get("/admin/all-orders")
-async def get_all_orders_for_admin(adminid: Optional[str] = None, admin: dict = Depends(get_current_admin)):
-    """Fetch every order in the system (Admin only). Accepts optional adminid query param."""
-    orders = await orders_collection.find().sort("created_at", -1).to_list(length=1000)
-    return {
+async def get_all_orders_for_admin(
+    adminid: Optional[str] = None,
+    limit: int = 20,
+    skip: int = 0,
+    admin: dict = Depends(get_current_admin)
+):
+
+    cache_key = f"orders:admin:all:{skip}:{limit}"
+
+    # Redis cache lookup
+    try:
+        cache_data = await redis_client.get(cache_key)
+
+        if cache_data:
+            return json.loads(cache_data)
+
+    except Exception:
+        pass
+
+    # MongoDB query
+    orders = (
+        await orders_collection.find()
+        .sort("created_at", -1)
+        .skip(skip)
+        .limit(limit)
+        .to_list(length=limit)
+    )
+
+    total_orders = await orders_collection.count_documents({})
+
+    response = {
         "message": "All orders fetched successfully",
-        "count": len(orders),
-        "adminid": adminid,
+        "count": total_orders,
+        "skip": skip,
+        "limit": limit,
         "data": all_orders_data(orders)
     }
+
+    encoded_response = jsonable_encoder(response)
+
+    # Store in Redis
+    try:
+        await redis_client.set(
+            cache_key,
+            json.dumps(encoded_response),
+            ex=300
+        )
+
+    except Exception:
+        pass
+
+    return response

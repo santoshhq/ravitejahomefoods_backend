@@ -14,6 +14,8 @@ from config.rate_limiter import limiter
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from config.redis_caching import redis_client
+from contextlib import asynccontextmanager
 
 app = FastAPI(title="RaviTeja Foods Backend")
 
@@ -33,9 +35,26 @@ app.add_middleware(
 )
 
 
-@app.on_event("startup")
-async def bootstrap_indexes():
-    await create_indexes()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+
+    # STARTUP
+
+
+    try:
+        await create_indexes()
+        await redis_client.ping()
+        print("✅ create_index and Redis Connected")
+    except Exception as e:
+        print(f"❌ Redis Error: {e}")
+
+    yield
+
+    # SHUTDOWN
+
+    await redis_client.close()
+
+    print("❌ Redis Connection Closed")
 
 
 @app.get("/")
