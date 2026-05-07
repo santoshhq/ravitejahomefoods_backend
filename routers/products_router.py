@@ -83,6 +83,23 @@ async def get_active_products(request: Request):
     products = await products_collection.find({"is_active": True}).to_list(1000)
     return all_products_data(products)
 
+
+@products_router.get("/active-by-category")
+@limiter.limit(RATE_LIMITS["product_read"])
+async def get_active_products_by_category(
+    request: Request,
+    category_id: str,
+    subcategory: Optional[str] = None
+):
+    """
+    Get all active products filtered by category and optional subcategory.
+    """
+    query = {"is_active": True, "category_id": category_id}
+    if subcategory is not None:
+        query["subcategory"] = subcategory
+    products = await products_collection.find(query).to_list(1000)
+    return all_products_data(products)
+
 @products_router.get("/by-admin/{admin_id}")
 @limiter.limit(RATE_LIMITS["product_read"])
 async def get_products_by_admin(request: Request, admin_id: str):

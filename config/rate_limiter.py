@@ -78,6 +78,7 @@ if storage_uri:
         default_limits=[DEFAULT_RATE_LIMIT],
         storage_uri=storage_uri,
     )
+
 else:
     limiter = Limiter(
         key_func=rate_limit_key,
