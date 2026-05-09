@@ -17,3 +17,15 @@ def indiviual_data(category) -> dict:
 
 def all_data(categories) -> list:
 	return [indiviual_data(category) for category in categories]
+
+def category_serializer(data: dict) -> dict:
+    """Serialize a single category."""
+    return {
+        "id": str(data.get("_id")),
+        "name": data.get("name"),
+    }
+
+
+def all_categories(categories: list) -> list:
+    """Serialize all categories."""
+    return [category.get("name") for category in categories if category.get("name")]

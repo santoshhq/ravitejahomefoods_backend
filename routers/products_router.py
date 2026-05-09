@@ -2,7 +2,8 @@
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 from typing import Annotated, Literal
 from schemas.products_schema import product_data, all_products_data
-from config.collection import products_collection, categories_collection
+from schemas.reviews_schema import all_reviews_data
+from config.collection import products_collection, categories_collection, reviews_collection
 from models.products_model import Products, UpdateProduct
 from datetime import datetime
 from typing import Optional,List
@@ -73,7 +74,7 @@ async def get_all_products(request: Request, admin_id: Optional[str] = None):
     """
     Get all products. If admin_id is provided, only return products created by that admin.
     """
-    cache_key="products_router:all"
+    cache_key = f"products_router:all:{admin_id or 'all'}"
     cache_data=await redis_client.get(cache_key)
     if cache_data:
         return json.loads(cache_data)
@@ -89,7 +90,7 @@ async def get_active_products(request: Request):
     """
     Get all active products.
     """
-    cache_key="products_router:get_active_products"
+    cache_key = "products_router:get_active_products"
     cache_data=await redis_client.get(cache_key)
     if cache_data:
         return json.loads(cache_data)  
@@ -109,8 +110,8 @@ async def get_active_products_by_category(
     """
     Get all active products filtered by category and optional subcategory.
     """
-    cachey_key="products_router:active-by-category"
-    cache_data=await redis_client.get(cachey_key)
+    cache_key = f"products_router:active-by-category:{category_id}:{subcategory or 'all'}"
+    cache_data = await redis_client.get(cache_key)
     if cache_data:
         return json.loads(cache_data)
     query = {"is_active": True, "category_id": category_id}
@@ -118,7 +119,7 @@ async def get_active_products_by_category(
         query["subcategory"] = subcategory
     products = await products_collection.find(query).to_list(1000)
     response= all_products_data(products)
-    await redis_client.set(cache_data,json.dumps(response),ex=300)
+    await redis_client.set(cache_key, json.dumps(response), ex=300)
     return response
 
 @products_router.get("/by-admin/{admin_id}")
@@ -127,7 +128,7 @@ async def get_products_by_admin(request: Request, admin_id: str):
     """
     Get all products created by a specific admin.
     """
-    cache_key="products_router:/by-admin/"
+    cache_key = f"products_router:by-admin:{admin_id}"
     cache_data=await redis_client.get(cache_key)
     if cache_data:
         return json.loads(cache_data)
@@ -140,14 +141,16 @@ async def get_products_by_admin(request: Request, admin_id: str):
 @limiter.limit(RATE_LIMITS["product_read"])
 async def get_product_by_id(request: Request, product_id: str):
     try:
-        cache_key="products_router:/get_product/product_id"
+        cache_key = f"products_router:get_product:{product_id}"
         cache_data=await redis_client.get(cache_key)
         if cache_data:
             return json.loads(cache_data)
         res = await products_collection.find_one({"_id": ObjectId(product_id)})
         if not res:
             raise HTTPException(status_code=404, detail="Product not found.")
-        response= product_data(res)
+        reviews = await reviews_collection.find({"product_id": product_id, "is_active": True}).to_list(1000)
+        response = product_data(res)
+        response["reviews"] = all_reviews_data(reviews)
         await redis_client.set(cache_key,json.dumps(response),ex=300)
         return response
     except Exception:
@@ -216,6 +219,12 @@ async def update_product(
 
     if not update_data:
         raise HTTPException(status_code=400, detail="No update fields provided.")
+
+    if "is_active" in update_data:
+        await reviews_collection.update_many(
+            {"product_id": product_id},
+            {"$set": {"is_active": update_data["is_active"]}},
+        )
     res = await products_collection.update_one({"_id": ObjectId(product_id)}, {"$set": update_data})
     await clear_products_routers_cache()
     return {"message": "Product updated", "updated_fields": update_data}
@@ -230,6 +239,15 @@ async def delete_product(request: Request, product_id: str):
     product = await products_collection.find_one({"_id": ObjectId(product_id)})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found.")
+    reviews = await reviews_collection.find({"product_id": product_id}).to_list(length=None)
+    for review in reviews:
+        for url in review.get("review_images_url", []):
+            try:
+                key = url.split(f".amazonaws.com/")[-1]
+                s3.delete_object(Bucket=BUCKET_NAME, Key=key)
+            except Exception:
+                pass
+    await reviews_collection.delete_many({"product_id": product_id})
     # Delete all images from S3
     for url in product.get("images_url", []):
         try:
@@ -240,3 +258,19 @@ async def delete_product(request: Request, product_id: str):
     res = await products_collection.delete_one({"_id": ObjectId(product_id)})
     await clear_products_routers_cache()
     return {"message": "Product deleted and images removed from S3"}
+
+@products_router.get("/business_type_products/{business_type}")
+@limiter.limit(RATE_LIMITS["product_read"])
+async def business_type_products(
+    request: Request,
+    business_type: Literal["retail", "wholesale"],
+):
+    cache_key = f"products_router:business_type:{business_type}"
+    cache_data = await redis_client.get(cache_key)
+    if cache_data:
+        return json.loads(cache_data)
+    products = await products_collection.find({"business_type": business_type}).to_list(1000)
+    res = all_products_data(products)
+    await redis_client.set(cache_key, json.dumps(res), ex=300)
+    return res
+

@@ -9,6 +9,7 @@ from routers.userslogin_routers import userlogin_router
 from routers.cart_router import cart_router
 from routers.orders_router import orders_router
 from routers.shippingcharges_router import shipping_router
+from routers.reviews_router import reviews_router
 from config.mongo_indexes import create_indexes
 from config.rate_limiter import limiter
 from slowapi import _rate_limit_exceeded_handler
@@ -71,3 +72,4 @@ app.include_router(userlogin_router)
 app.include_router(cart_router)
 app.include_router(orders_router)
 app.include_router(shipping_router)
+app.include_router(reviews_router)

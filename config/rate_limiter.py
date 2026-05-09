@@ -50,6 +50,10 @@ RATE_LIMITS = {
     "product_read": "30/second; 120/minute",
     "product_write": "20/minute",
 
+    # ⭐ Reviews
+    "review_read": "60/minute",
+    "review_write": "20/minute",
+
     # 📤 Uploads
     "upload_write": "10/minute",
     "upload_read": "60/minute",

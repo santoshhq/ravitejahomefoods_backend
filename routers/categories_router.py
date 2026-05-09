@@ -2,13 +2,14 @@ from bson.errors import InvalidId
 from bson.objectid import ObjectId
 from fastapi import APIRouter, HTTPException, Request, status, Query
 import re
+import json
 from pymongo import ReturnDocument
 from typing import Literal, Optional
 from config.collection import categories_collection, products_collection
 from models.categories_models import CreateCategory, UpdateCategory
-from schemas.categories_schema import all_data, indiviual_data
+from schemas.categories_schema import all_data, indiviual_data,all_categories
 from config.rate_limiter import limiter, RATE_LIMITS
-
+from config.redis_caching import redis_client,clear_category_routers_cache
 
 categories_router = APIRouter(prefix="/categories", tags=["Categories"])
 
@@ -178,3 +179,15 @@ async def delete_category(request: Request, category_id: str):
 		raise HTTPException(status_code=400, detail="Invalid category_id")
 	except Exception as e:
 		raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@categories_router.get("/all_Categories/{business_type}")
+@limiter.limit(RATE_LIMITS["category_read"])
+async def get_all_Categories(request: Request, business_type: Literal["retail", "wholesale"]):
+    cache_key=f"categories_router:get_all_Categories/{business_type}"
+    cache_data=await redis_client.get(cache_key)
+    if cache_data:
+        return json.loads(cache_data)
+    categories = await categories_collection.find({"business_type": business_type}).to_list(length=None)
+    res = all_categories(categories)
+    await redis_client.set(cache_key,json.dumps(res),ex=300)
+    return res
