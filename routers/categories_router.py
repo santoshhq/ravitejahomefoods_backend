@@ -9,7 +9,7 @@ from config.collection import categories_collection, products_collection
 from models.categories_models import CreateCategory, UpdateCategory
 from schemas.categories_schema import all_data, indiviual_data,all_categories
 from config.rate_limiter import limiter, RATE_LIMITS
-from config.redis_caching import redis_client,clear_category_routers_cache
+from config.redis_caching import redis_client, clear_category_routers_cache, CACHE_TTL_SECONDS
 
 categories_router = APIRouter(prefix="/categories", tags=["Categories"])
 
@@ -189,5 +189,5 @@ async def get_all_Categories(request: Request, business_type: Literal["retail", 
         return json.loads(cache_data)
     categories = await categories_collection.find({"business_type": business_type}).to_list(length=None)
     res = all_categories(categories)
-    await redis_client.set(cache_key,json.dumps(res),ex=300)
+    await redis_client.set(cache_key, json.dumps(res), ex=CACHE_TTL_SECONDS)
     return res

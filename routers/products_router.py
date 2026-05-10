@@ -13,7 +13,7 @@ import json
 from bson import ObjectId
 from config.aws_boto3 import s3, BUCKET_NAME
 from config.rate_limiter import limiter, RATE_LIMITS
-from config.redis_caching import redis_client, clear_products_routers_cache
+from config.redis_caching import redis_client, clear_products_routers_cache, CACHE_TTL_SECONDS
 
 products_router = APIRouter(prefix="/products", tags=["Products"])
 AWS_REGION = "us-east-1"
@@ -81,7 +81,7 @@ async def get_all_products(request: Request, admin_id: Optional[str] = None):
     query = {"admin_id": admin_id} if admin_id else {}
     products = await products_collection.find(query).to_list(1000)
     response= all_products_data(products)
-    await redis_client.set(cache_key,json.dumps(response),ex=300)
+    await redis_client.set(cache_key, json.dumps(response), ex=CACHE_TTL_SECONDS)
     return response
 # Get all products for a specific admin
 @products_router.get("/get_active_products")
@@ -96,7 +96,7 @@ async def get_active_products(request: Request):
         return json.loads(cache_data)  
     products = await products_collection.find({"is_active": True}).to_list(1000)
     response= all_products_data(products)
-    await redis_client.set(cache_key,json.dumps(response),ex=300)
+    await redis_client.set(cache_key, json.dumps(response), ex=CACHE_TTL_SECONDS)
     return response
 
 
@@ -119,7 +119,7 @@ async def get_active_products_by_category(
         query["subcategory"] = subcategory
     products = await products_collection.find(query).to_list(1000)
     response= all_products_data(products)
-    await redis_client.set(cache_key, json.dumps(response), ex=300)
+    await redis_client.set(cache_key, json.dumps(response), ex=CACHE_TTL_SECONDS)
     return response
 
 @products_router.get("/by-admin/{admin_id}")
@@ -134,7 +134,7 @@ async def get_products_by_admin(request: Request, admin_id: str):
         return json.loads(cache_data)
     products = await products_collection.find({"admin_id": admin_id}).to_list(1000)
     response= all_products_data(products)
-    await redis_client.set(cache_key,json.dumps(response),ex=300)
+    await redis_client.set(cache_key, json.dumps(response), ex=CACHE_TTL_SECONDS)
     return response
 
 @products_router.get('/get_product/{product_id}')
@@ -151,7 +151,7 @@ async def get_product_by_id(request: Request, product_id: str):
         reviews = await reviews_collection.find({"product_id": product_id, "is_active": True}).to_list(1000)
         response = product_data(res)
         response["reviews"] = all_reviews_data(reviews)
-        await redis_client.set(cache_key,json.dumps(response),ex=300)
+        await redis_client.set(cache_key, json.dumps(response), ex=CACHE_TTL_SECONDS)
         return response
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid product_id")
@@ -271,6 +271,6 @@ async def business_type_products(
         return json.loads(cache_data)
     products = await products_collection.find({"business_type": business_type}).to_list(1000)
     res = all_products_data(products)
-    await redis_client.set(cache_key, json.dumps(res), ex=300)
+    await redis_client.set(cache_key, json.dumps(res), ex=CACHE_TTL_SECONDS)
     return res
 

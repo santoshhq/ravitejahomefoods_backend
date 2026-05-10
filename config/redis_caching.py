@@ -1,10 +1,15 @@
+import os
+
 from redis.asyncio import Redis
 
-redis_client=Redis(
-    host="localhost",
-    port=6379,
-    decode_responses=True
+REDIS_URL = os.getenv(
+    "REDIS_URL",
+    "redis://default:379lYBXFGf8cKhTwyOkKS2poa0e2FRz2@redis-17059.crce276.ap-south-1-3.ec2.cloud.redislabs.com:17059",
 )
+
+CACHE_TTL_SECONDS = int(os.getenv("REDIS_TTL_SECONDS", "120"))
+
+redis_client = Redis.from_url(REDIS_URL, decode_responses=True)
 
 
 async def clear_products_routers_cache():

@@ -35,15 +35,5 @@ def product_data(product) -> dict:
 def all_products_data(products) -> list:
     return [product_data(product) for product in products]
 
-def category_serializer(data: dict) -> dict:
-    """Serialize a single category."""
-    return {
-        "id": str(data.get("_id")),
-        "name": data.get("name"),
-    }
 
-
-def all_categories(categories: list) -> list:
-    """Serialize all categories."""
-    return [category.get("name") for category in categories if category.get("name")]
     

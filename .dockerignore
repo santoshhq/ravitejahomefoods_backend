@@ -10,9 +10,6 @@ dist/
 *.egg-info/
 .venv/
 venv/
-env/
-.env
-.env.*
 .vscode/
 .idea/
 .mypy_cache/

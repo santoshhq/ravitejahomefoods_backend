@@ -29,7 +29,7 @@ from schemas.cart_schema import cart_data
 from routers.cart_router import get_current_user, get_optional_user
 from config.jwt_auth.token_creation import get_current_admin
 from config.rate_limiter import limiter, RATE_LIMITS
-from config.redis_caching import redis_client,clear_orders_routers_cache
+from config.redis_caching import redis_client, clear_orders_routers_cache, CACHE_TTL_SECONDS
 orders_router = APIRouter(prefix="/orders", tags=["Orders"])
 
 # Initialize Razorpay Client
@@ -454,7 +454,7 @@ async def get_all_orders_for_admin(
         await redis_client.set(
             cache_key,
             json.dumps(encoded_response),
-            ex=300
+            ex=CACHE_TTL_SECONDS,
         )
 
     except Exception:

@@ -2,7 +2,6 @@ import os
 from fastapi import Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-
 # 🔐 Hybrid key: user (token) + fallback IP
 def rate_limit_key(request: Request):
     auth = request.headers.get("Authorization")
@@ -54,6 +53,9 @@ RATE_LIMITS = {
     "review_read": "60/minute",
     "review_write": "20/minute",
 
+    # 📊 Dashboard
+    "dashboard_read": "30/minute",
+
     # 📤 Uploads
     "upload_write": "10/minute",
     "upload_read": "60/minute",
@@ -73,18 +75,11 @@ RATE_LIMITS = {
 
 
 # 🔗 Redis (for production scaling)
-storage_uri = os.getenv("RATE_LIMIT_STORAGE_URI") or os.getenv("REDIS_URL")
 
+storage_uri="redis://default:8vVs4zo6T8YrKm01P3Yb2hw6fWw2976X@redis-15911.crce206.ap-south-1-1.ec2.cloud.redislabs.com:15911"
 # ⚙️ Create limiter
-if storage_uri:
-    limiter = Limiter(
-        key_func=rate_limit_key,
-        default_limits=[DEFAULT_RATE_LIMIT],
-        storage_uri=storage_uri,
-    )
-
-else:
-    limiter = Limiter(
-        key_func=rate_limit_key,
-        default_limits=[DEFAULT_RATE_LIMIT],
-    )
+limiter = Limiter(
+    key_func=rate_limit_key,
+    default_limits=[DEFAULT_RATE_LIMIT],
+    storage_uri=storage_uri,
+)
