@@ -1,10 +1,12 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request, Depends
 from typing import List, Optional
 from datetime import datetime
 from bson import ObjectId
 import json
 import uuid
 
+from pydantic import ValidationError
+from models.reviews_model import Reviews, ReviewUpdate
 from config.collection import reviews_collection
 from config.aws_boto3 import s3, BUCKET_NAME
 from config.rate_limiter import limiter, RATE_LIMITS
@@ -12,6 +14,54 @@ from schemas.reviews_schema import review_data, all_reviews_data
 
 reviews_router = APIRouter(prefix="/reviews", tags=["Reviews"])
 AWS_REGION = "us-east-1"
+
+
+def parse_review_form(
+	product_id: str = Form(...),
+	rating: int = Form(...),
+	review_title: str = Form(...),
+	review_content: str = Form(...),
+	display_name: str = Form(...),
+	email_address: str = Form(...),
+	mobile_number: str = Form(...),
+	is_active: bool = Form(True),
+):
+	try:
+		return Reviews(
+			product_id=product_id,
+			rating=rating,
+			review_title=review_title,
+			review_content=review_content,
+			display_name=display_name,
+			email_address=email_address,
+			mobile_number=mobile_number,
+			is_active=is_active,
+		)
+	except ValidationError as exc:
+		raise HTTPException(status_code=400, detail=exc.errors()) from exc
+
+
+def parse_review_update_form(
+	rating: Optional[int] = Form(None),
+	review_title: Optional[str] = Form(None),
+	review_content: Optional[str] = Form(None),
+	display_name: Optional[str] = Form(None),
+	email_address: Optional[str] = Form(None),
+	mobile_number: Optional[str] = Form(None),
+	is_active: Optional[bool] = Form(None),
+):
+	try:
+		return ReviewUpdate(
+			rating=rating,
+			review_title=review_title,
+			review_content=review_content,
+			display_name=display_name,
+			email_address=email_address,
+			mobile_number=mobile_number,
+			is_active=is_active,
+		)
+	except ValidationError as exc:
+		raise HTTPException(status_code=400, detail=exc.errors()) from exc
 
 
 async def _upload_review_images(files: Optional[List[UploadFile]]) -> list:
@@ -41,36 +91,33 @@ def _delete_s3_images(image_urls: list) -> None:
 			pass
 
 
-@reviews_router.post("/create_review")
+@reviews_router.post("/create_review", status_code=201)
 @limiter.limit(RATE_LIMITS["review_write"])
 async def create_review(
 	request: Request,
-	product_id: str = Form(...),
-	rating: int = Form(...),
-	review_title: str = Form(...),
-	review_content: str = Form(...),
-	display_name: str = Form(...),
-	email_address: str = Form(...),
-	mobile_number: str = Form(...),
-	is_active: Optional[bool] = Form(True),
+	review: Reviews = Depends(parse_review_form),
 	files: Optional[List[UploadFile]] = File(None),
 ):
 	review_images_url = await _upload_review_images(files)
 	payload = {
-		"product_id": product_id,
-		"rating": rating,
-		"review_title": review_title,
-		"review_content": review_content,
+		"product_id": review.product_id,
+		"rating": review.rating,
+		"review_title": review.review_title,
+		"review_content": review.review_content,
 		"review_images_url": review_images_url,
-		"display_name": display_name,
-		"email_address": email_address,
-		"mobile_number": mobile_number,
-		"is_active": True if is_active is None else is_active,
+		"display_name": review.display_name,
+		"email_address": review.email_address,
+		"mobile_number": review.mobile_number,
+		"is_active": True if review.is_active is None else review.is_active,
 		"created_at": datetime.utcnow().isoformat(),
 		"updated_at": None,
 	}
 	res = await reviews_collection.insert_one(payload)
-	return {"message": "Review created", "review_id": str(res.inserted_id)}
+	created = await reviews_collection.find_one({"_id": ObjectId(res.inserted_id)})
+	return {
+		"message": "Review created",
+		"data": review_data(created) if created else {"id": str(res.inserted_id)},
+	}
 
 
 @reviews_router.get("/product/{product_id}")
@@ -84,7 +131,13 @@ async def get_reviews_by_product(
 	if is_active is not None:
 		query["is_active"] = is_active
 	reviews = await reviews_collection.find(query).to_list(1000)
-	return all_reviews_data(reviews)
+	ratings = [review.get("rating") for review in reviews if isinstance(review.get("rating"), (int, float))]
+	avg_rating = round(sum(ratings) / len(ratings), 2) if ratings else 0.0
+	return {
+		"count": len(reviews),
+		"avg_rating": avg_rating,
+		"data": all_reviews_data(reviews),
+	}
 
 
 @reviews_router.get("/{review_id}")
@@ -94,7 +147,7 @@ async def get_review_by_id(request: Request, review_id: str):
 		review = await reviews_collection.find_one({"_id": ObjectId(review_id)})
 		if not review:
 			raise HTTPException(status_code=404, detail="Review not found.")
-		return review_data(review)
+		return {"data": review_data(review)}
 	except Exception:
 		raise HTTPException(status_code=400, detail="Invalid review_id")
 
@@ -104,34 +157,14 @@ async def get_review_by_id(request: Request, review_id: str):
 async def update_review(
 	request: Request,
 	review_id: str,
-	rating: Optional[int] = Form(None),
-	review_title: Optional[str] = Form(None),
-	review_content: Optional[str] = Form(None),
-	display_name: Optional[str] = Form(None),
-	email_address: Optional[str] = Form(None),
-	mobile_number: Optional[str] = Form(None),
-	is_active: Optional[bool] = Form(None),
+	review_update: ReviewUpdate = Depends(parse_review_update_form),
 	files: Optional[List[UploadFile]] = File(None),
 ):
 	review = await reviews_collection.find_one({"_id": ObjectId(review_id)})
 	if not review:
 		raise HTTPException(status_code=404, detail="Review not found.")
 
-	update_data = {}
-	if rating is not None:
-		update_data["rating"] = rating
-	if review_title is not None:
-		update_data["review_title"] = review_title
-	if review_content is not None:
-		update_data["review_content"] = review_content
-	if display_name is not None:
-		update_data["display_name"] = display_name
-	if email_address is not None:
-		update_data["email_address"] = email_address
-	if mobile_number is not None:
-		update_data["mobile_number"] = mobile_number
-	if is_active is not None:
-		update_data["is_active"] = is_active
+	update_data = review_update.model_dump(exclude_none=True)
 
 	if files is not None:
 		_delete_s3_images(review.get("review_images_url", []))
@@ -142,7 +175,8 @@ async def update_review(
 
 	update_data["updated_at"] = datetime.utcnow().isoformat()
 	await reviews_collection.update_one({"_id": ObjectId(review_id)}, {"$set": update_data})
-	return {"message": "Review updated"}
+	updated = await reviews_collection.find_one({"_id": ObjectId(review_id)})
+	return {"message": "Review updated", "data": review_data(updated) if updated else None}
 
 
 @reviews_router.delete("/delete_review/{review_id}")
@@ -153,7 +187,7 @@ async def delete_review(request: Request, review_id: str):
 		raise HTTPException(status_code=404, detail="Review not found.")
 	_delete_s3_images(review.get("review_images_url", []))
 	await reviews_collection.delete_one({"_id": ObjectId(review_id)})
-	return {"message": "Review deleted"}
+	return {"message": "Review deleted", "data": {"id": review_id}}
 
 
 @reviews_router.delete("/delete_by_product/{product_id}")
@@ -163,4 +197,8 @@ async def delete_reviews_by_product(request: Request, product_id: str):
 	for review in reviews:
 		_delete_s3_images(review.get("review_images_url", []))
 	result = await reviews_collection.delete_many({"product_id": product_id})
-	return {"message": "Reviews deleted", "deleted_count": result.deleted_count}
+	return {
+		"message": "Reviews deleted",
+		"deleted_count": result.deleted_count,
+		"product_id": product_id,
+	}

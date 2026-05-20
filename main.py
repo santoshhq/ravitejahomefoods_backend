@@ -18,9 +18,33 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from config.redis_caching import redis_client
 from contextlib import asynccontextmanager
+from prometheus_fastapi_instrumentator import Instrumentator
 
-app = FastAPI(title="RaviTeja Foods Backend")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
 
+    # STARTUP
+
+
+    try:
+        await create_indexes()
+        await redis_client.ping()
+        print("✅ create_index and Redis Connected")
+    except Exception as e:
+        print(f"❌ Redis Error: {e}")
+
+    yield
+
+    # SHUTDOWN
+
+    await redis_client.close()
+
+    print("❌ Redis Connection Closed")
+    
+    
+app = FastAPI(title="RaviTeja Foods Backend",lifespan=lifespan)
+# ── PROMETHEUS METRICS ──────────────────────────────────────────
+Instrumentator().instrument(app).expose(app)
 # ── RATE_LIMITER ──────────────────────────────────────────────────────────
 app.state.limiter=limiter
 app.add_exception_handler(RateLimitExceeded,_rate_limit_exceeded_handler)
