@@ -1,5 +1,15 @@
 def pricing_data(pricing_list):
     """Serialize a list of Pricing objects or dicts to a list of dicts."""
+    if pricing_list is None:
+        return []
+    if not isinstance(pricing_list, list):
+        return [
+            {
+                "weight": None,
+                "price": pricing_list,
+                "stock": None,
+            }
+        ]
     result = []
     for item in pricing_list or []:
         if isinstance(item, dict):
