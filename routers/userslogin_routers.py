@@ -5,7 +5,7 @@ import random
 import string
 import os
 import httpx
-from config.collection import users_collection
+from config.collection import users_collection, orders_collection
 from models.userslogin_models import OTPModel,UserModel
 from config.jwt_auth.token_creation import create_access_token, decode_access_token
 from fastapi.security import OAuth2PasswordBearer
@@ -118,3 +118,60 @@ async def get_me(request: Request, email: str = Depends(get_current_user)):
 		raise HTTPException(status_code=404, detail="User not found")
 	user["id"] = str(user.pop("_id"))
 	return user
+
+
+###################################################
+# GET USER ORDERS
+###################################################
+
+@userlogin_router.get("/orders")
+@limiter.limit(RATE_LIMITS["user_me"])
+async def get_user_orders(request: Request, email: str = Depends(get_current_user)):
+	"""
+	Fetch all orders for the authenticated user by their email
+	
+	Returns:
+	- List of orders with order details, status, and payment information
+	"""
+	orders = await orders_collection.find(
+		{"user_email": email}
+	).sort("_id", -1).to_list(None)
+	
+	if not orders:
+		return {
+			"email": email,
+			"orders": [],
+			"total_orders": 0,
+			"message": "No orders found"
+		}
+	
+	# Serialize orders
+	serialized_orders = []
+	for order in orders:
+		order_data = {
+			"order_id": str(order.get("_id")),
+			"user_email": order.get("user_email"),
+			"guest_id": order.get("guest_id"),
+			"items": order.get("items", []),
+			"shipping_address": order.get("shipping_address"),
+			"billing_address": order.get("billing_address"),
+			"subtotal": order.get("subtotal"),
+			"discount_amount": order.get("discount_amount", 0.0),
+			"gst_amount": order.get("gst_amount", 0.0),
+			"delivery_charges": order.get("delivery_charges", 0.0),
+			"grand_total": order.get("grand_total"),
+			"coupon_code": order.get("coupon_code"),
+			"razorpay_order_id": order.get("razorpay_order_id"),
+			"razorpay_payment_id": order.get("razorpay_payment_id"),
+			"order_status": order.get("order_status"),
+			"payment_status": order.get("payment_status"),
+			"created_at": order.get("created_at"),
+			"updated_at": order.get("updated_at")
+		}
+		serialized_orders.append(order_data)
+	
+	return {
+		"email": email,
+		"orders": serialized_orders,
+		"total_orders": len(serialized_orders)
+	}

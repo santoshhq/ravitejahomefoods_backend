@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, EmailStr
-from typing import List, Optional
+from typing import List, Optional, Literal
 from datetime import datetime
 from models.cart_model import CartItem
 
@@ -52,8 +52,7 @@ class OrderModel(BaseModel):
     razorpay_order_id: str
     razorpay_payment_id: Optional[str] = None
     
-    order_status: str = Field(default="pending")    # pending, confirmed, shipped, delivered, cancelled
-    payment_status: str = Field(default="unpaid")    # unpaid, paid, failed
+    order_status: Literal["pending", "confirmed"] = "pending"
+    payment_status: Literal["paid"] = "paid"
     
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+  

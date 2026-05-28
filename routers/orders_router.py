@@ -379,7 +379,7 @@ async def verify_payment(request: Request, req: PaymentVerificationRequest, curr
         "razorpay_order_id": req.razorpay_order_id,
         "razorpay_payment_id": req.razorpay_payment_id,
         "custom_order_id": custom_order_id,
-        "order_status": "confirmed",
+        "order_status": "pending",
         "payment_status": "paid",
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow()
@@ -461,3 +461,93 @@ async def get_all_orders_for_admin(
         pass
 
     return response
+
+
+@orders_router.patch("/admin/update-status/{order_id}")
+@limiter.limit(RATE_LIMITS["order_verify"])
+async def admin_update_order_status(
+    request: Request,
+    order_id: str,
+    new_status: str,
+    admin: dict = Depends(get_current_admin)
+):
+    """
+    Admin endpoint to update order status from pending to confirmed
+    
+    Parameters:
+    - order_id: MongoDB ObjectId or custom_order_id
+    - new_status: Must be "confirmed" (to accept the pending order)
+    
+    Valid Status Transition:
+    - pending → confirmed (Admin accepts the order)
+    
+    Returns:
+    - Updated order confirmation
+    """
+    
+    # Valid status values
+    VALID_STATUSES = ["confirmed"]
+    
+    # Validate new status
+    if new_status.lower() not in VALID_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Must be 'confirmed' to accept the pending order"
+        )
+    
+    new_status = new_status.lower()
+    
+    # Find the order by either ObjectId or custom_order_id
+    order_doc = None
+    try:
+        # Try as ObjectId first
+        order_doc = await orders_collection.find_one({"_id": ObjectId(order_id)})
+    except Exception:
+        # Try as custom_order_id
+        order_doc = await orders_collection.find_one({"custom_order_id": order_id})
+    
+    if not order_doc:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    current_status = order_doc.get("order_status", "pending")
+    
+    # Only allow pending → confirmed transition
+    if current_status != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Order is already '{current_status}'. Can only accept pending orders"
+        )
+    
+    # Update the order status
+    try:
+        result = await orders_collection.update_one(
+            {"_id": order_doc["_id"]},
+            {
+                "$set": {
+                    "order_status": new_status,
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        
+        if result.modified_count == 0:
+            raise HTTPException(status_code=500, detail="Failed to update order status")
+        
+        # Clear the cache for admin orders
+        await clear_orders_routers_cache()
+        
+        return {
+            "status": "success",
+            "message": f"Order accepted and status changed to 'confirmed'",
+            "order_id": str(order_doc.get("_id")),
+            "custom_order_id": order_doc.get("custom_order_id"),
+            "previous_status": "pending",
+            "new_status": "confirmed",
+            "updated_at": datetime.utcnow().isoformat(),
+            "email": order_doc.get("user_email", "Guest")
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update order: {str(e)}")

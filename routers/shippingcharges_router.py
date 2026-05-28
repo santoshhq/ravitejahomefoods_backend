@@ -13,6 +13,10 @@ from models.shippingcharges_model import (
  CountryShippingCreate,
  AddStateRequest,
  AddZoneRequest,
+ UpdateZoneRequest,
+ DeleteZoneRequest,
+ DeleteStateRequest,
+ DeleteCountryRequest,
  ShippingEstimateRequest
 )
 from schemas.shippingcharges_schema import individual_shipping_config,serialized_shipping_configs
@@ -363,6 +367,311 @@ async def add_zone(
    }
 
 
+###################################################
+# EDIT ZONE
+###################################################
+
+@shipping_router.patch(
+"/admin/{admin_id}/edit-zone"
+)
+@limiter.limit(RATE_LIMITS["shipping_write"])
+async def edit_zone(
+ request: Request,
+ admin_id: str,
+ payload: UpdateZoneRequest
+):
+   """
+   Edit/Update an existing zone in a state
+   Admin can update any combination of fields (charge_per_kg, free_delivery_min_order_value)
+   
+   Parameters:
+   - admin_id: Admin ID
+   - payload: UpdateZoneRequest with old zipcode ranges to identify zone
+             and optional new values to update
+   """
+   
+   doc = await shipping_charges.find_one({
+      "admin_id": admin_id,
+      "country": payload.country
+   })
+
+   if not doc:
+      raise HTTPException(
+         404,
+         "Country config not found"
+      )
+
+   states = doc["states"]
+   found_state = False
+   updated_fields = {}
+
+   for state in states:
+      if state["state_name"].lower() == payload.state_name.lower():
+         found_state = True
+         found_zone = False
+
+         for zone in state["zones"]:
+            if (
+               zone["start_zipcode"] == payload.old_start_zipcode
+               and
+               zone["end_zipcode"] == payload.old_end_zipcode
+            ):
+               found_zone = True
+               
+               # Store old values for response
+               updated_fields["previous_values"] = {
+                  "charge_per_kg": zone["charge_per_kg"],
+                  "free_delivery_min_order_value": zone["free_delivery_min_order_value"]
+               }
+               
+               # Update only provided fields
+               if payload.new_charge_per_kg is not None:
+                  zone["charge_per_kg"] = payload.new_charge_per_kg
+                  
+               if payload.new_free_delivery_min_order_value is not None:
+                  zone["free_delivery_min_order_value"] = payload.new_free_delivery_min_order_value
+               
+               # Store new values for response
+               updated_fields["updated_values"] = {
+                  "charge_per_kg": zone["charge_per_kg"],
+                  "free_delivery_min_order_value": zone["free_delivery_min_order_value"]
+               }
+               break
+
+         if not found_zone:
+            raise HTTPException(
+               404,
+               "Zone not found with those zipcode ranges"
+            )
+         break
+
+   if not found_state:
+      raise HTTPException(
+         404,
+         "State not found"
+      )
+
+   await shipping_charges.update_one(
+      {"_id": doc["_id"]},
+      {
+         "$set": {
+            "states": states,
+            "updated_at": datetime.utcnow()
+         }
+      }
+   )
+
+   return {
+      "message": "Zone updated successfully",
+      "country": payload.country,
+      "state": payload.state_name,
+      "zone_identified_by": {
+         "start_zipcode": payload.old_start_zipcode,
+         "end_zipcode": payload.old_end_zipcode
+      },
+      "previous_values": updated_fields.get("previous_values"),
+      "updated_values": updated_fields.get("updated_values")
+   }
+
+
+###################################################
+# DELETE ZONE
+###################################################
+
+@shipping_router.delete(
+"/admin/{admin_id}/delete-zone"
+)
+@limiter.limit(RATE_LIMITS["shipping_write"])
+async def delete_zone(
+ request: Request,
+ admin_id: str,
+ payload: DeleteZoneRequest
+):
+   """
+   Delete a zone from a state
+   
+   Parameters:
+   - admin_id: Admin ID
+   - payload: DeleteZoneRequest with country, state_name, and zipcode ranges
+   """
+   
+   doc = await shipping_charges.find_one({
+      "admin_id": admin_id,
+      "country": payload.country
+   })
+
+   if not doc:
+      raise HTTPException(
+         404,
+         "Country config not found"
+      )
+
+   states = doc["states"]
+   found_state = False
+   zone_found = False
+
+   for state in states:
+      if state["state_name"].lower() == payload.state_name.lower():
+         found_state = True
+         # Filter out the zone to delete
+         original_count = len(state["zones"])
+         state["zones"] = [
+            zone for zone in state["zones"]
+            if not (
+               zone["start_zipcode"] == payload.start_zipcode
+               and
+               zone["end_zipcode"] == payload.end_zipcode
+            )
+         ]
+         if len(state["zones"]) < original_count:
+            zone_found = True
+         break
+
+   if not found_state:
+      raise HTTPException(
+         404,
+         "State not found"
+      )
+
+   if not zone_found:
+      raise HTTPException(
+         404,
+         "Zone not found with those zipcode ranges"
+      )
+
+   await shipping_charges.update_one(
+      {"_id": doc["_id"]},
+      {
+         "$set": {
+            "states": states,
+            "updated_at": datetime.utcnow()
+         }
+      }
+   )
+
+   return {
+      "message": "Zone deleted successfully",
+      "country": payload.country,
+      "state": payload.state_name,
+      "deleted_zone": {
+         "start_zipcode": payload.start_zipcode,
+         "end_zipcode": payload.end_zipcode
+      }
+   }
+
+
+###################################################
+# DELETE STATE
+###################################################
+
+@shipping_router.delete(
+"/admin/{admin_id}/delete-state"
+)
+@limiter.limit(RATE_LIMITS["shipping_write"])
+async def delete_state(
+ request: Request,
+ admin_id: str,
+ payload: DeleteStateRequest
+):
+   """
+   Delete a complete state and all its zones
+   
+   Parameters:
+   - admin_id: Admin ID
+   - payload: DeleteStateRequest with country and state_name
+   """
+   
+   doc = await shipping_charges.find_one({
+      "admin_id": admin_id,
+      "country": payload.country
+   })
+
+   if not doc:
+      raise HTTPException(
+         404,
+         "Country config not found"
+      )
+
+   original_states_count = len(doc["states"])
+   
+   # Filter out the state to delete
+   doc["states"] = [
+      state for state in doc["states"]
+      if state["state_name"].lower() != payload.state_name.lower()
+   ]
+
+   if len(doc["states"]) >= original_states_count:
+      raise HTTPException(
+         404,
+         "State not found"
+      )
+
+   await shipping_charges.update_one(
+      {"_id": doc["_id"]},
+      {
+         "$set": {
+            "states": doc["states"],
+            "updated_at": datetime.utcnow()
+         }
+      }
+   )
+
+   return {
+      "message": "State and all its zones deleted successfully",
+      "country": payload.country,
+      "deleted_state": payload.state_name
+   }
+
+
+###################################################
+# DELETE COUNTRY
+###################################################
+
+@shipping_router.delete(
+"/admin/{admin_id}/delete-country"
+)
+@limiter.limit(RATE_LIMITS["shipping_write"])
+async def delete_country(
+ request: Request,
+ admin_id: str,
+ payload: DeleteCountryRequest
+):
+   """
+   Delete a complete country and all its states/zones
+   
+   Parameters:
+   - admin_id: Admin ID
+   - payload: DeleteCountryRequest with country name
+   """
+   
+   doc = await shipping_charges.find_one({
+      "admin_id": admin_id,
+      "country": payload.country
+   })
+
+   if not doc:
+      raise HTTPException(
+         404,
+         "Country config not found"
+      )
+
+   result = await shipping_charges.delete_one({
+      "admin_id": admin_id,
+      "country": payload.country
+   })
+
+   if result.deleted_count == 0:
+      raise HTTPException(
+         404,
+         "Country config not found"
+      )
+
+   return {
+      "message": "Country and all its states/zones deleted successfully",
+      "deleted_country": payload.country,
+      "admin_id": admin_id
+   }
+
 
 ###################################################
 # SHIPPING ESTIMATION
@@ -434,12 +743,16 @@ async def estimate_shipping(
    # FREE SHIPPING
    ##################################
 
+   free_delivery_threshold = matched_zone.get(
+      "free_delivery_min_order_value"
+   )
+
    if (
+      free_delivery_threshold is not None
+      and
       payload.order_total
       >=
-      matched_zone[
-        "free_delivery_min_order_value"
-      ]
+      free_delivery_threshold
    ):
 
        return {
@@ -506,4 +819,55 @@ async def estimate_shipping(
 
       "free_delivery":
          False
+   }
+
+
+###################################################
+# DELETE COUNTRY
+###################################################
+
+@shipping_router.delete(
+"/admin/{admin_id}/delete-country"
+)
+@limiter.limit(RATE_LIMITS["shipping_write"])
+async def delete_country(
+ request: Request,
+ admin_id: str,
+ country: str
+):
+   """
+   Delete a complete country configuration and all its states and zones
+   
+   Parameters:
+   - admin_id: Admin ID
+   - country: Country name to delete (query parameter)
+   """
+   
+   doc = await shipping_charges.find_one({
+      "admin_id": admin_id,
+      "country": country
+   })
+
+   if not doc:
+      raise HTTPException(
+         status_code=404,
+         detail="Country configuration not found"
+      )
+
+   result = await shipping_charges.delete_one({
+      "admin_id": admin_id,
+      "country": country
+   })
+
+   if result.deleted_count == 0:
+      raise HTTPException(
+         status_code=500,
+         detail="Failed to delete country configuration"
+      )
+
+   return {
+      "message": "Country configuration deleted successfully",
+      "deleted_country": country,
+      "admin_id": admin_id,
+      "states_deleted": len(doc.get("states", []))
    }
