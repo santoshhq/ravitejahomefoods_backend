@@ -11,6 +11,7 @@ from routers.orders_router import orders_router
 from routers.shippingcharges_router import shipping_router
 from routers.reviews_router import reviews_router
 from routers.dashboard_router import dashboard_router
+from routers.issues_router import issues_router
 from config.mongo_indexes import create_indexes
 from config.rate_limiter import limiter
 from slowapi import _rate_limit_exceeded_handler
@@ -19,7 +20,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from config.redis_caching import redis_client
 from contextlib import asynccontextmanager
 from prometheus_fastapi_instrumentator import Instrumentator
-
+from routers.issues_router import issues_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
@@ -99,3 +100,4 @@ app.include_router(orders_router)
 app.include_router(shipping_router)
 app.include_router(reviews_router)
 app.include_router(dashboard_router)
+app.include_router(issues_router)

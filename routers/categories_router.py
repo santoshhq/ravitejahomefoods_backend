@@ -8,6 +8,7 @@ from typing import Literal, Optional
 from config.collection import categories_collection, products_collection
 from models.categories_models import CreateCategory, UpdateCategory
 from schemas.categories_schema import all_data, indiviual_data,all_categories
+from schemas.products_schema import all_products_data
 from config.rate_limiter import limiter, RATE_LIMITS
 from config.redis_caching import redis_client, clear_category_routers_cache, CACHE_TTL_SECONDS
 
@@ -124,6 +125,42 @@ async def get_categories_by_business_type(
 		raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
+@categories_router.get("/get_all_categories")
+@limiter.limit(RATE_LIMITS["category_read"])
+async def get_all_categories(request: Request):
+	"""
+	Get all categories including subcategories.
+	"""
+	try:
+		categories = await categories_collection.find({}).to_list(length=None)
+		return {
+			"count": len(categories),
+			"data": all_data(categories),
+		}
+	except Exception as e:
+		raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@categories_router.get("/with_subcategories")
+@limiter.limit(RATE_LIMITS["category_read"])
+async def get_categories_with_subcategories(request: Request):
+	"""
+	Get all categories; show subcategories when available, otherwise null.
+	"""
+	try:
+		categories = await categories_collection.find({}).to_list(length=None)
+		data = all_data(categories)
+		for item in data:
+			if not item.get("subcategory"):
+				item["subcategory"] = None
+		return {
+			"count": len(categories),
+			"data": data,
+		}
+	except Exception as e:
+		raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
 @categories_router.get("/{category_id}")
 @limiter.limit(RATE_LIMITS["category_read"])
 async def get_category(request: Request, category_id: str):
@@ -183,11 +220,35 @@ async def delete_category(request: Request, category_id: str):
 @categories_router.get("/all_Categories/{business_type}")
 @limiter.limit(RATE_LIMITS["category_read"])
 async def get_all_Categories(request: Request, business_type: Literal["retail", "wholesale"]):
-    cache_key=f"categories_router:get_all_Categories/{business_type}"
-    cache_data=await redis_client.get(cache_key)
-    if cache_data:
-        return json.loads(cache_data)
-    categories = await categories_collection.find({"business_type": business_type}).to_list(length=None)
-    res = all_categories(categories)
-    await redis_client.set(cache_key, json.dumps(res), ex=CACHE_TTL_SECONDS)
-    return res
+	cache_key = f"categories_router:get_all_Categories/{business_type}"
+	cache_data = await redis_client.get(cache_key)
+	if cache_data:
+		return json.loads(cache_data)
+	categories = await categories_collection.find({"business_type": business_type}).to_list(length=None)
+	res = all_categories(categories)
+	await redis_client.set(cache_key, json.dumps(res), ex=CACHE_TTL_SECONDS)
+	return res
+
+@categories_router.get("/all_products_by_subCategory/{subcategory}")
+@limiter.limit(RATE_LIMITS["product_read"])
+async def get_all_products_by_subcategory(request: Request, subcategory: str):
+	"""
+	Get all products that match the given subcategory name (case-insensitive).
+	"""
+	try:
+		cache_key = f"categories_router:get_all_products_by_subCategory/{subcategory}"
+		cache_data = await redis_client.get(cache_key)
+		if cache_data:
+			return json.loads(cache_data)
+		query = {"subcategory": {"$regex": f"^{re.escape(subcategory)}$", "$options": "i"}}
+		products = await products_collection.find(query).to_list(1000)
+		res = {
+			"subcategory": subcategory,
+			"count": len(products),
+			"data": all_products_data(products),
+		}
+		await redis_client.set(cache_key, json.dumps(res), ex=CACHE_TTL_SECONDS)
+		return res
+	except Exception as e:
+		raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+

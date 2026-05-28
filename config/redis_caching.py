@@ -4,7 +4,7 @@ from redis.asyncio import Redis
 
 REDIS_URL = os.getenv(
     "REDIS_URL",
-    "redis://default:379lYBXFGf8cKhTwyOkKS2poa0e2FRz2@redis-17059.crce276.ap-south-1-3.ec2.cloud.redislabs.com:17059",
+    "redis://redis:6379/1",
 )
 
 CACHE_TTL_SECONDS = int(os.getenv("REDIS_TTL_SECONDS", "120"))
@@ -18,6 +18,8 @@ async def clear_products_routers_cache():
         
 async def clear_orders_routers_cache():
     async for key in redis_client.scan_iter("orders_router:*"):
+        await redis_client.delete(key)
+    async for key in redis_client.scan_iter("orders:*"):
         await redis_client.delete(key)
         
 async def clear_category_routers_cache():

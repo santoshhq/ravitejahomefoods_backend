@@ -76,8 +76,7 @@ RATE_LIMITS = {
 
 # 🔗 Redis (for production scaling)
 
-storage_uri="redis://default:8vVs4zo6T8YrKm01P3Yb2hw6fWw2976X@redis-15911.crce206.ap-south-1-1.ec2.cloud.redislabs.com:15911"
-# ⚙️ Create limiter
+storage_uri="redis://redis:6379/1"
 limiter = Limiter(
     key_func=rate_limit_key,
     default_limits=[DEFAULT_RATE_LIMIT],

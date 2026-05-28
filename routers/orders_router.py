@@ -249,7 +249,7 @@ async def place_order(request: Request, req: PlaceOrderRequest, current_user: st
         except ValueError:
             raise HTTPException(
                 status_code=400,
-                detail="Delivery for retail products is only available for pincodes between 500001 and 500115."
+                detail="Delivery for retail products is only available in Hyderabad "
             )
             
     subtotal = cart["subtotal"]

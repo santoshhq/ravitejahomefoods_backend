@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from slowapi.storage.memory import MemoryStorage
+from limits.storage import MemoryStorage
 
 import main
 import config.redis_caching as redis_caching

@@ -140,6 +140,39 @@ async def get_reviews_by_product(
 	}
 
 
+@reviews_router.get("/product/{product_id}/paginated")
+@limiter.limit(RATE_LIMITS["review_read"])
+async def get_reviews_by_product_paginated(
+	request: Request,
+	product_id: str,
+	is_active: Optional[bool] = True,
+	skip: int = 0,
+	limit: int = 5,
+):
+	query = {"product_id": product_id}
+	if is_active is not None:
+		query["is_active"] = is_active
+	all_reviews = await reviews_collection.find(query).to_list(1000)
+	ratings = [review.get("rating") for review in all_reviews if isinstance(review.get("rating"), (int, float))]
+	avg_rating = round(sum(ratings) / len(ratings), 2) if ratings else 0.0
+	total_count = len(all_reviews)
+
+	paginated_reviews = all_reviews[skip:skip+limit]
+	has_next = (skip + limit) < total_count
+	next_skip = skip + limit if has_next else None
+
+	return {
+		"count": total_count,
+		"avg_rating": avg_rating,
+		"skip": skip,
+		"limit": limit,
+		"has_next": has_next,
+		"next_skip": next_skip,
+		"data": all_reviews_data(paginated_reviews),
+	}
+
+
+
 @reviews_router.get("/{review_id}")
 @limiter.limit(RATE_LIMITS["review_read"])
 async def get_review_by_id(request: Request, review_id: str):
