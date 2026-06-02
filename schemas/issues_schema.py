@@ -33,7 +33,9 @@ class IssuesCreate(BaseModel):
 class IssuesResponse(BaseModel):
     issue_id: str
     order_id: str
+    payment_id: Optional[str] = None
     email: EmailStr
+    mobile: Optional[str] = None
     issue_type: Literal["Refund/Return", "Cancel Order", "Replace Order"]
     detailed_reason: str
     image_urls: Optional[List[str]] = None

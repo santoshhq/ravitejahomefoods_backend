@@ -14,7 +14,7 @@ class Issues(BaseModel):
     mobile: str = Field(..., min_length=10)
     issue_type: Literal["Refund/Return", "Cancel Order", "Replace Order"]
     detailed_reason: str = Field(..., min_length=10)
-    image_urls: Optional[List[AnyHttpUrl]] = None
+    image_urls: Optional[List[str]] = None
     status: Literal["Pending", "Solved"] = "Pending"
 
     @field_validator("image_urls")
