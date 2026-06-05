@@ -6,7 +6,13 @@ from fastapi import APIRouter, HTTPException, Request, status, Depends
 from fastapi.encoders import jsonable_encoder
 import random
 import string
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+
+# Indian Standard Time (UTC+5:30)
+_IST = timezone(timedelta(hours=5, minutes=30))
+def now_ist() -> str:
+    """Return current IST datetime as a readable string: 05 Jun 2026, 10:09 AM"""
+    return datetime.now(_IST).strftime("%d %b %Y, %I:%M %p")
 from typing import Optional
 from math import ceil
 import re
@@ -24,7 +30,7 @@ from models.order_model import (
     DeliveryEstimateRequest,
     OrderModel,
 )
-from schemas.order_schema import order_data, all_orders_data
+from schemas.order_schema import order_data, all_orders_data, single_order_data
 from schemas.cart_schema import cart_data
 from routers.cart_router import get_current_user, get_optional_user
 from config.jwt_auth.token_creation import get_current_admin
@@ -52,57 +58,184 @@ async def send_order_confirmation_email(user_email: str, order: dict):
     for item in order["items"]:
         items_html += f"""
         <tr>
-            <td style='padding: 8px; border-bottom: 1px solid #eee;'>{item['product_name']} ({item['weight']})</td>
-            <td style='padding: 8px; border-bottom: 1px solid #eee;'>{item['quantity']}</td>
-            <td style='padding: 8px; border-bottom: 1px solid #eee;'>₹{item['price']}</td>
-            <td style='padding: 8px; border-bottom: 1px solid #eee; text-align: right;'>₹{item['price'] * item['quantity']}</td>
+            <td style='padding: 12px 16px; border-bottom: 1px solid #e8dcc8; font-size: 14px; color: #3d2c1e;'>
+                <strong>{item['product_name']}</strong>
+                <span style='display: block; font-size: 12px; color: #8a7060; margin-top: 2px;'>{item['weight']}</span>
+            </td>
+            <td style='padding: 12px 16px; border-bottom: 1px solid #e8dcc8; font-size: 14px; color: #3d2c1e; text-align: center;'>{item['quantity']}</td>
+            <td style='padding: 12px 16px; border-bottom: 1px solid #e8dcc8; font-size: 14px; color: #3d2c1e; text-align: center;'>₹{item['price']}</td>
+            <td style='padding: 12px 16px; border-bottom: 1px solid #e8dcc8; font-size: 14px; color: #7B1113; font-weight: 700; text-align: right;'>₹{item['price'] * item['quantity']}</td>
         </tr>
         """
 
     html_content = f"""
-    <div style='font-family: sans-serif; color: #333; max-width: 600px; margin: auto; border: 1px solid #ddd; padding: 20px; border-radius: 10px;'>
-        <h2 style='color: #E63946; text-align: center;'>Order Confirmed! ✅</h2>
-        <p>Hello,</p>
-        <p>Thank you for your order from <strong>RaviTeja Foods</strong>. Your payment was successful.</p>
-        <hr/>
-        <h4>Order Summary</h4>
-        <p><strong>Order ID:</strong> {order.get('custom_order_id', order['razorpay_order_id'])}<br/>
-        <strong>Payment ID:</strong> {order.get('razorpay_payment_id', 'N/A')}</p>
-        <table style='width: 100%; border-collapse: collapse;'>
-            <thead>
-                <tr style='background: #f8f8f8;'>
-                    <th style='text-align: left; padding: 8px;'>Item</th>
-                    <th style='text-align: left; padding: 8px;'>Qty</th>
-                    <th style='text-align: left; padding: 8px;'>Price</th>
-                    <th style='text-align: right; padding: 8px;'>Total</th>
-                </tr>
-            </thead>
-            <tbody>
-                {items_html}
-            </tbody>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+        <title>Order Confirmed - RaviTeja Home Foods</title>
+    </head>
+    <body style='margin: 0; padding: 0; background-color: #f5f0e8; font-family: Georgia, "Times New Roman", serif;'>
+
+        <!-- Outer wrapper -->
+        <table width="100%" cellpadding="0" cellspacing="0" style='background-color: #f5f0e8; padding: 32px 16px;'>
+            <tr>
+                <td align="center">
+                    <table width="600" cellpadding="0" cellspacing="0" style='max-width: 600px; width: 100%;'>
+
+                        <!-- ===== HEADER ===== -->
+                        <tr>
+                            <td style='background: linear-gradient(135deg, #7B1113 0%, #5A0D0F 100%); border-radius: 16px 16px 0 0; padding: 36px 40px; text-align: center;'>
+                                <!-- Logo / Brand Name -->
+                                <div style='display: inline-block; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 50px; padding: 6px 20px; margin-bottom: 16px;'>
+                                    <span style='color: #c9a84c; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; font-family: Arial, sans-serif;'>Home Foods</span>
+                                </div>
+                                <h1 style='margin: 0 0 4px 0; font-size: 30px; font-weight: 700; color: #ffffff; letter-spacing: -0.5px;'>RaviTeja Home Foods Pvt Ltd</h1>
+                                <p style='margin: 0; font-size: 13px; color: #E8D7D7; letter-spacing: 1px; font-family: Arial, sans-serif; text-transform: uppercase;'>Pure · Natural · Homemade</p>
+
+                                <!-- Success Badge -->
+                                <div style='margin-top: 28px; background: rgba(201, 168, 76, 0.15); border: 1.5px solid #c9a84c; border-radius: 50px; display: inline-block; padding: 10px 28px;'>
+                                    <span style='color: #c9a84c; font-size: 15px; font-weight: 600; font-family: Arial, sans-serif;'>✓ &nbsp;Order Confirmed!</span>
+                                </div>
+                            </td>
+                        </tr>
+
+                        <!-- ===== GREETING BAND ===== -->
+                        <tr>
+                            <td style='background-color: #c9a84c; padding: 14px 40px;'>
+                                <p style='margin: 0; font-size: 13px; color: #5A0D0F; font-family: Arial, sans-serif; font-weight: 600; text-align: center; letter-spacing: 0.5px;'>
+                                    🙏 &nbsp;Thank you for trusting our homemade goodness!
+                                </p>
+                            </td>
+                        </tr>
+
+                        <!-- ===== MAIN BODY ===== -->
+                        <tr>
+                            <td style='background-color: #ffffff; padding: 36px 40px;'>
+
+                                <p style='margin: 0 0 8px 0; font-size: 16px; color: #3d2c1e;'>Dear Customer,</p>
+                                <p style='margin: 0 0 28px 0; font-size: 15px; color: #5a4535; line-height: 1.7;'>
+                                    Your order has been successfully placed and payment confirmed. We're already preparing your fresh homemade products with love and care. 🌿
+                                </p>
+
+                                <!-- Order Meta Box -->
+                                <table width="100%" cellpadding="0" cellspacing="0" style='background: #f9f5ee; border: 1px solid #e8dcc8; border-radius: 10px; margin-bottom: 28px;'>
+                                    <tr>
+                                        <td style='padding: 16px 20px; border-right: 1px solid #e8dcc8;'>
+                                            <p style='margin: 0; font-size: 11px; color: #8a7060; text-transform: uppercase; letter-spacing: 1px; font-family: Arial, sans-serif;'>Order ID</p>
+                                            <p style='margin: 4px 0 0 0; font-size: 14px; color: #7B1113; font-weight: 700; font-family: Arial, sans-serif;'>{order.get('custom_order_id', order['razorpay_order_id'])}</p>
+                                        </td>
+                                        <td style='padding: 16px 20px;'>
+                                            <p style='margin: 0; font-size: 11px; color: #8a7060; text-transform: uppercase; letter-spacing: 1px; font-family: Arial, sans-serif;'>Payment ID</p>
+                                            <p style='margin: 4px 0 0 0; font-size: 14px; color: #7B1113; font-weight: 700; font-family: Arial, sans-serif;'>{order.get('razorpay_payment_id', 'N/A')}</p>
+                                        </td>
+                                    </tr>
+                                </table>
+
+                                <!-- Section Title -->
+                                <h3 style='margin: 0 0 12px 0; font-size: 13px; color: #8a7060; text-transform: uppercase; letter-spacing: 2px; font-family: Arial, sans-serif; font-weight: 600; border-bottom: 2px solid #c9a84c; padding-bottom: 8px;'>
+                                    🛒 &nbsp;Order Summary
+                                </h3>
+
+                                <!-- Items Table -->
+                                <table width="100%" cellpadding="0" cellspacing="0" style='border: 1px solid #e8dcc8; border-radius: 10px; overflow: hidden; margin-bottom: 20px;'>
+                                    <thead>
+                                        <tr style='background: #7B1113;'>
+                                            <th style='text-align: left; padding: 12px 16px; font-size: 11px; color: #E8D7D7; text-transform: uppercase; letter-spacing: 1.5px; font-family: Arial, sans-serif; font-weight: 600;'>Item</th>
+                                            <th style='text-align: center; padding: 12px 16px; font-size: 11px; color: #E8D7D7; text-transform: uppercase; letter-spacing: 1.5px; font-family: Arial, sans-serif; font-weight: 600;'>Qty</th>
+                                            <th style='text-align: center; padding: 12px 16px; font-size: 11px; color: #E8D7D7; text-transform: uppercase; letter-spacing: 1.5px; font-family: Arial, sans-serif; font-weight: 600;'>Price</th>
+                                            <th style='text-align: right; padding: 12px 16px; font-size: 11px; color: #E8D7D7; text-transform: uppercase; letter-spacing: 1.5px; font-family: Arial, sans-serif; font-weight: 600;'>Total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {items_html}
+                                    </tbody>
+                                </table>
+
+                                <!-- Pricing Breakdown -->
+                                <table width="100%" cellpadding="0" cellspacing="0" style='margin-bottom: 28px;'>
+                                    <tr>
+                                        <td style='padding: 5px 0; font-size: 14px; color: #5a4535; font-family: Arial, sans-serif;'>Subtotal</td>
+                                        <td style='padding: 5px 0; font-size: 14px; color: #3d2c1e; text-align: right; font-family: Arial, sans-serif;'>₹{order['subtotal']}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style='padding: 5px 0; font-size: 14px; color: #5a4535; font-family: Arial, sans-serif;'>
+                                            Discount
+                                            {'<span style="background:#F8F1E7; color:#7B1113; font-size:11px; padding:2px 8px; border-radius:4px; margin-left:8px; font-weight:600;">' + order.get('coupon_code', '') + '</span>' if order.get('coupon_code') else ''}
+                                        </td>
+                                        <td style='padding: 5px 0; font-size: 14px; color: #7B1113; font-weight: 600; text-align: right; font-family: Arial, sans-serif;'>-₹{order['discount_amount']}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style='padding: 5px 0; font-size: 14px; color: #5a4535; font-family: Arial, sans-serif;'>GST</td>
+                                        <td style='padding: 5px 0; font-size: 14px; color: #5a4535; text-align: right; font-family: Arial, sans-serif; font-style: italic;'>Included</td>
+                                    </tr>
+                                    <tr>
+                                        <td style='padding: 5px 0 12px 0; font-size: 14px; color: #5a4535; font-family: Arial, sans-serif; border-bottom: 1px dashed #e8dcc8;'>Delivery</td>
+                                        <td style='padding: 5px 0 12px 0; font-size: 14px; color: #3d2c1e; text-align: right; font-family: Arial, sans-serif; border-bottom: 1px dashed #e8dcc8;'>₹{order['delivery_charges']}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style='padding: 14px 20px; background: linear-gradient(135deg, #7B1113, #5A0D0F); border-radius: 10px 0 0 10px;'>
+                                            <span style='font-size: 16px; color: #ffffff; font-family: Arial, sans-serif; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;'>Grand Total</span>
+                                        </td>
+                                        <td style='padding: 14px 20px; background: #c9a84c; border-radius: 0 10px 10px 0; text-align: right;'>
+                                            <span style='font-size: 22px; color: #5A0D0F; font-family: Arial, sans-serif; font-weight: 800;'>₹{order['grand_total']}</span>
+                                        </td>
+                                    </tr>
+                                </table>
+
+                                <!-- Delivery Address -->
+                                <h3 style='margin: 0 0 12px 0; font-size: 13px; color: #8a7060; text-transform: uppercase; letter-spacing: 2px; font-family: Arial, sans-serif; font-weight: 600; border-bottom: 2px solid #c9a84c; padding-bottom: 8px;'>
+                                    📦 &nbsp;Delivery Address
+                                </h3>
+                                <table width="100%" cellpadding="0" cellspacing="0">
+                                    <tr>
+                                        <td style='background: #f9f5ee; border: 1px solid #e8dcc8; border-left: 4px solid #7B1113; border-radius: 0 8px 8px 0; padding: 16px 20px;'>
+                                            <p style='margin: 0; font-size: 15px; color: #3d2c1e; font-weight: 700; font-family: Arial, sans-serif;'>{order['shipping_address']['name']}</p>
+                                            <p style='margin: 4px 0 0 0; font-size: 14px; color: #5a4535; font-family: Arial, sans-serif; line-height: 1.7;'>
+                                                📱 {order['shipping_address']['mobile']}<br/>
+                                                {order['shipping_address']['address_line']}, {order['shipping_address']['city']}<br/>
+                                                {order['shipping_address'].get('state', '')}, {order['shipping_address']['country']} – {order['shipping_address']['pincode']}
+                                            </p>
+                                        </td>
+                                    </tr>
+                                </table>
+
+                                <!-- Reassurance Note -->
+                                <table width="100%" cellpadding="0" cellspacing="0" style='margin-top: 28px;'>
+                                    <tr>
+                                        <td style='background: #F8F1E7; border-radius: 10px; padding: 16px 20px; text-align: center;'>
+                                            <p style='margin: 0; font-size: 13px; color: #7B1113; font-family: Arial, sans-serif; line-height: 1.6;'>
+                                                🌿 &nbsp;Your order will be freshly prepared and dispatched soon.<br/>
+                                                For queries, reach us at <a href='mailto:support@ravitejahomefoods.in' style='color: #7B1113; font-weight: 700;'>support@ravitejahomefoods.in</a>
+                                            </p>
+                                        </td>
+                                    </tr>
+                                </table>
+
+                            </td>
+                        </tr>
+
+                        <!-- ===== FOOTER ===== -->
+                        <tr>
+                            <td style='background: #5A0D0F; border-radius: 0 0 16px 16px; padding: 24px 40px; text-align: center;'>
+                                <p style='margin: 0 0 8px 0; font-size: 15px; color: #c9a84c; font-weight: 700; letter-spacing: 1px; font-family: Arial, sans-serif;'>RaviTeja Home Foods</p>
+                                <p style='margin: 0 0 12px 0; font-size: 12px; color: #D2A355; font-family: Arial, sans-serif;'>
+                                    <a href='https://ravitejahomefoods.in' style='color: #D2A355; text-decoration: none;'>ravitejahomefoods.in</a>
+                                </p>
+                                <p style='margin: 0; font-size: 11px; color: #B88A3F; font-family: Arial, sans-serif;'>
+                                    © {datetime.now().year} RaviTeja Home Foods. All rights reserved.
+                                </p>
+                            </td>
+                        </tr>
+
+                    </table>
+                </td>
+            </tr>
         </table>
-        
-        <div style='text-align: right; margin-top: 15px;'>
-            <p><strong>Subtotal:</strong> ₹{order['subtotal']}</p>
-            <p><strong>Discount ({order.get('coupon_code') or 'None'}):</strong> -₹{order['discount_amount']}</p>
-            <p><strong>GST (12%):</strong> ₹{order['gst_amount']}</p>
-            <p><strong>Delivery:</strong> ₹{order['delivery_charges']}</p>
-            <h3 style='color: #1D3557;'>Grand Total: ₹{order['grand_total']}</h3>
-        </div>
-        
-        <hr/>
-        <h4>Delivery Address:</h4>
-        <p>
-            {order['shipping_address']['name']}<br/>
-            {order['shipping_address']['mobile']}<br/>
-            {order['shipping_address']['address_line']}, {order['shipping_address']['city']}<br/>
-            {order['shipping_address'].get('state', '')}, {order['shipping_address']['country']} - {order['shipping_address']['pincode']}
-        </p>
-        
-        <p style='font-size: 12px; color: #777; text-align: center;'>
-            &copy; {datetime.now().year} RaviTeja Foods. All rights reserved.
-        </p>
-    </div>
+
+    </body>
+    </html>
     """
 
     async with httpx.AsyncClient() as client:
@@ -113,9 +246,9 @@ async def send_order_confirmation_email(user_email: str, order: dict):
                 "Content-Type": "application/json",
             },
             json={
-                "from": "RaviTeja Foods <orders@genxtechnologies.tech>",
+                "from": "RaviTeja Home Foods <orders@ravitejahomefoods.in>",
                 "to": [user_email],
-                "subject": f"Order Confirmed - {order.get('custom_order_id', order['razorpay_order_id'])}",
+                "subject": f"✅ Order Confirmed – {order.get('custom_order_id', order['razorpay_order_id'])} | RaviTeja Home Foods",
                 "html": html_content
             },
             timeout=10.0
@@ -381,8 +514,8 @@ async def verify_payment(request: Request, req: PaymentVerificationRequest, curr
         "custom_order_id": custom_order_id,
         "order_status": "pending",
         "payment_status": "paid",
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow()
+        "created_at": now_ist(),
+        "updated_at": now_ist()
     }
     result = await orders_collection.insert_one(order_doc)
 
@@ -472,82 +605,136 @@ async def admin_update_order_status(
     admin: dict = Depends(get_current_admin)
 ):
     """
-    Admin endpoint to update order status from pending to confirmed
-    
+    Admin endpoint to update order status.
+
     Parameters:
     - order_id: MongoDB ObjectId or custom_order_id
-    - new_status: Must be "confirmed" (to accept the pending order)
-    
-    Valid Status Transition:
-    - pending → confirmed (Admin accepts the order)
-    
+    - new_status: Target status to transition to
+
+    Valid Status Transitions:
+    - pending   → confirmed  (Admin accepts the order)
+    - confirmed → shipped    (Admin marks order as shipped)
+    - shipped   → delivered  (Admin marks order as delivered)
+
     Returns:
-    - Updated order confirmation
+    - Updated order confirmation with previous and new status
     """
-    
-    # Valid status values
-    VALID_STATUSES = ["confirmed"]
-    
-    # Validate new status
-    if new_status.lower() not in VALID_STATUSES:
+
+    # Allowed transitions: current_status → allowed next statuses
+    VALID_TRANSITIONS: dict[str, list[str]] = {
+        "pending":   ["confirmed"],
+        "confirmed": ["shipped"],
+        "shipped":   ["delivered"],
+        "delivered": [],   # terminal state
+    }
+
+    # Human-friendly messages per transition
+    TRANSITION_MESSAGES: dict[str, str] = {
+        "confirmed": "Order confirmed successfully.",
+        "shipped":   "Order marked as shipped.",
+        "delivered": "Order marked as delivered.",
+    }
+
+    new_status = new_status.lower().strip()
+
+    # Validate the requested status is a known value
+    all_valid = {s for transitions in VALID_TRANSITIONS.values() for s in transitions}
+    if new_status not in all_valid:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid status. Must be 'confirmed' to accept the pending order"
+            detail=(
+                f"Invalid status '{new_status}'. "
+                f"Allowed values: {sorted(all_valid)}"
+            ),
         )
-    
-    new_status = new_status.lower()
-    
-    # Find the order by either ObjectId or custom_order_id
+
+    # Find the order by ObjectId or custom_order_id
     order_doc = None
     try:
-        # Try as ObjectId first
         order_doc = await orders_collection.find_one({"_id": ObjectId(order_id)})
     except Exception:
-        # Try as custom_order_id
         order_doc = await orders_collection.find_one({"custom_order_id": order_id})
-    
+
     if not order_doc:
         raise HTTPException(status_code=404, detail="Order not found")
-    
+
     current_status = order_doc.get("order_status", "pending")
-    
-    # Only allow pending → confirmed transition
-    if current_status != "pending":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Order is already '{current_status}'. Can only accept pending orders"
-        )
-    
-    # Update the order status
+
+    # Check that the requested transition is valid from the current status
+    allowed_next = VALID_TRANSITIONS.get(current_status, [])
+    if new_status not in allowed_next:
+        if not allowed_next:
+            detail = f"Order is already '{current_status}' (terminal state). No further updates allowed."
+        else:
+            detail = (
+                f"Cannot transition from '{current_status}' to '{new_status}'. "
+                f"From '{current_status}', only allowed: {allowed_next}"
+            )
+        raise HTTPException(status_code=400, detail=detail)
+
+    # Apply the update
     try:
         result = await orders_collection.update_one(
             {"_id": order_doc["_id"]},
             {
                 "$set": {
                     "order_status": new_status,
-                    "updated_at": datetime.utcnow()
+                    "updated_at": now_ist(),
                 }
-            }
+            },
         )
-        
+
         if result.modified_count == 0:
             raise HTTPException(status_code=500, detail="Failed to update order status")
-        
-        # Clear the cache for admin orders
+
+        # Clear cache
         await clear_orders_routers_cache()
-        
+
         return {
             "status": "success",
-            "message": f"Order accepted and status changed to 'confirmed'",
+            "message": TRANSITION_MESSAGES.get(new_status, f"Order status updated to '{new_status}'"),
             "order_id": str(order_doc.get("_id")),
             "custom_order_id": order_doc.get("custom_order_id"),
-            "previous_status": "pending",
-            "new_status": "confirmed",
-            "updated_at": datetime.utcnow().isoformat(),
-            "email": order_doc.get("user_email", "Guest")
+            "previous_status": current_status,
+            "new_status": new_status,
+            "updated_at": now_ist(),
+            "email": order_doc.get("user_email", "Guest"),
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update order: {str(e)}")
+
+
+# ─────────────────────────────────────────────────────────────
+# GET order by MongoDB ObjectId
+# ─────────────────────────────────────────────────────────────
+@orders_router.get("/order/{order_id}", summary="Get full order details by ObjectId")
+async def get_order_by_id(
+    order_id: str,
+    current_admin=Depends(get_current_admin),
+):
+    """
+    Fetch full details of a single order using its MongoDB ObjectId.
+    Accessible by admin only.
+    """
+    # Validate ObjectId format
+    if not ObjectId.is_valid(order_id):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid order id format: '{order_id}'"
+        )
+
+    order_doc = await orders_collection.find_one({"_id": ObjectId(order_id)})
+
+    if not order_doc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Order with id '{order_id}' not found"
+        )
+
+    return {
+        "status": "success",
+        "order": single_order_data(order_doc),
+    }

@@ -52,7 +52,7 @@ class OrderModel(BaseModel):
     razorpay_order_id: str
     razorpay_payment_id: Optional[str] = None
     
-    order_status: Literal["pending", "confirmed"] = "pending"
+    order_status: Literal["pending", "confirmed", "shipped", "delivered"] = "pending"
     payment_status: Literal["paid"] = "paid"
     
   
